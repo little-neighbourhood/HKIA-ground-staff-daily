@@ -1,0 +1,2506 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>HKG 機場地勤日常模擬器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Noto Sans TC', 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+    /* Custom scrollbar for PIL & Phone */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.2);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.5);
+      border-radius: 9999px;
+    }
+    @keyframes pulseFast {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(1.06); }
+    }
+    .animate-final-call {
+      animation: pulseFast 0.7s infinite;
+    }
+    @keyframes scanLine {
+      0% { top: 8%; }
+      50% { top: 88%; }
+      100% { top: 8%; }
+    }
+    .scanner-laser {
+      animation: scanLine 2.2s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-slate-900">
+
+  <!-- Main 2.5D Airport Canvas -->
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Top HUD Bar -->
+  <header id="topHud" class="fixed top-0 left-0 right-0 z-20 flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-950/90 backdrop-blur-md border-b border-slate-700/80 shadow-lg">
+    <!-- Left: Stage & Flight Info -->
+    <div class="flex items-center gap-2 sm:gap-3">
+      <div class="flex items-center gap-1.5 bg-amber-500/20 border border-amber-400/50 px-2.5 py-1 rounded-lg">
+        <span class="text-amber-400 font-black text-xs sm:text-sm tracking-wider" id="hudStageBadge">STAGE 1/3</span>
+        <span class="text-slate-200 font-bold text-xs sm:text-sm" id="hudStageName">到達前準備</span>
+      </div>
+      <div class="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-lg">
+        <span class="text-sky-400 font-extrabold text-xs sm:text-sm" id="hudFlightNo">CX888</span>
+        <span class="text-slate-400 text-xs">|</span>
+        <span class="text-emerald-400 font-bold text-xs sm:text-sm" id="hudGateNo">GATE 24</span>
+        <span class="text-slate-400 text-xs hidden sm:inline">|</span>
+        <span class="text-amber-300 font-mono font-bold text-xs sm:text-sm hidden sm:inline" id="hudClock">ETA -15m</span>
+      </div>
+    </div>
+
+    <!-- Center: Dynamic Objective Banner -->
+    <div id="hudObjective" class="order-3 w-full sm:order-2 sm:w-auto flex-1 max-w-xl mx-auto text-center bg-slate-800/80 border border-slate-600/60 px-3 py-1 rounded-lg text-xs sm:text-sm font-medium text-sky-100 truncate">
+      📋 請先打開「航班特別事項 (PIL)」查閱本班機特別乘客及注意事項
+    </div>
+
+    <!-- Right: Score, Complaints & Gear Buttons -->
+    <div class="order-2 sm:order-3 flex items-center gap-1.5 sm:gap-2">
+      <div class="flex items-center gap-2 bg-slate-800/90 border border-slate-700 px-2.5 py-1 rounded-lg text-xs sm:text-sm">
+        <span class="text-emerald-400 font-bold">評分: <span id="hudScore">100</span></span>
+        <span class="text-rose-400 font-bold">投訴: <span id="hudComplaints">0</span></span>
+      </div>
+      <button id="btnOpenPil" class="relative flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs sm:text-sm px-2.5 py-1.5 rounded-lg shadow transition cursor-pointer">
+        <span>📋</span>
+        <span class="hidden md:inline">航班特別事項 (PIL)</span>
+        <span class="md:hidden">PIL</span>
+        <span id="pilUnreadDot" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full animate-ping"></span>
+      </button>
+      <button id="btnOpenPhone" class="relative flex items-center gap-1 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-xs sm:text-sm px-2.5 py-1.5 rounded-lg shadow transition cursor-pointer">
+        <span>📱</span>
+        <span class="hidden md:inline">公司電話</span>
+        <span class="md:hidden">電話</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Urgent Business Class Alert Banner (Stage 3) -->
+  <div id="bizAlertBanner" class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-30 bg-rose-600/95 border-2 border-amber-300 text-white px-4 py-2 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce">
+    <span class="text-xl">👑</span>
+    <div class="text-xs sm:text-sm font-extrabold">
+      商務艙貴賓 (Business Class) 準備登機！請於 <span id="bizCountdownText" class="text-amber-200 underline text-base">7.0s</span> 內帶入左邊專屬通道！
+    </div>
+  </div>
+
+  <!-- Contextual Action Floating Button (e.g., Doc Check at Counter / Ready to Disembark) -->
+  <div id="floatingActionContainer" class="fixed bottom-5 left-1/2 -translate-x-1/2 z-20 flex flex-wrap justify-center gap-3 pointer-events-none">
+    <button id="btnDocCheckTrigger" class="hidden pointer-events-auto flex items-center gap-2 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black text-sm sm:text-base px-5 py-3 rounded-2xl shadow-2xl border-2 border-white transition cursor-pointer">
+      <span>🛂</span>
+      <span>doc check</span>
+    </button>
+    <button id="btnStartStage2" class="hidden pointer-events-auto flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 font-black text-sm sm:text-base px-5 py-3 rounded-2xl shadow-2xl border-2 border-white transition cursor-pointer">
+      <span>🛬</span>
+      <span>航班已泊橋，開始落機（進入第二關）</span>
+    </button>
+    <button id="btnStartStage3" class="hidden pointer-events-auto flex items-center gap-2 bg-sky-500 hover:bg-sky-400 active:scale-95 text-slate-950 font-black text-sm sm:text-base px-5 py-3 rounded-2xl shadow-2xl border-2 border-white transition cursor-pointer">
+      <span>🛫</span>
+      <span>特別乘客已處理完畢，前往第三關</span>
+    </button>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-20 right-3 z-40 flex flex-col gap-2 max-w-xs sm:max-w-sm pointer-events-none"></div>
+
+  <!-- ================= MODAL 1: PIL (Passenger Information List) ================= -->
+  <div id="pilModal" class="hidden fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-3">
+    <div class="bg-slate-900 border border-slate-600 rounded-2xl w-full max-w-2xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 bg-indigo-950 border-b border-indigo-700/60">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">📋</span>
+          <div>
+            <h2 class="font-black text-base sm:text-lg text-white">PASSENGER INFORMATION LIST (PIL)</h2>
+            <p class="text-xs text-indigo-300" id="pilSubHeader">HKG 機場地勤航班特別事項簡報</p>
+          </div>
+        </div>
+        <button id="btnClosePil" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer">✕ 關閉</button>
+      </div>
+      <div id="pilContent" class="p-4 overflow-y-auto space-y-4 text-xs sm:text-sm">
+        <!-- Dynamically populated PIL sections -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 2: COMPANY SMARTPHONE ================= -->
+  <div id="phoneModal" class="hidden fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-3">
+    <!-- Smartphone Chassis -->
+    <div class="relative w-full max-w-[360px] h-[610px] max-h-[90vh] bg-slate-950 rounded-[36px] border-[5px] border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+      <!-- Phone Top Notch & Status -->
+      <div class="flex items-center justify-between px-5 pt-2.5 pb-2 bg-slate-900 text-[11px] text-slate-300 border-b border-slate-800">
+        <span class="font-bold">HKG-OPS 5G</span>
+        <div class="w-20 h-4 bg-black rounded-full"></div>
+        <span id="phoneTimeStr">14:25</span>
+      </div>
+
+      <!-- Phone App Navigation Bar -->
+      <div class="flex items-center justify-between px-3 py-2 bg-slate-900/90 border-b border-slate-800">
+        <button id="btnPhoneHome" class="text-xs font-bold text-sky-400 hover:text-sky-300 px-2 py-1 rounded bg-slate-800 cursor-pointer">⊞ 主畫面</button>
+        <span id="phoneAppTitle" class="text-xs font-extrabold text-white tracking-wide">地勤隨身終端</span>
+        <button id="btnClosePhone" class="text-xs font-bold text-rose-400 hover:text-rose-300 px-2 py-1 rounded bg-slate-800 cursor-pointer">收起電話</button>
+      </div>
+
+      <!-- Phone Screen Body -->
+      <div id="phoneBody" class="flex-1 overflow-y-auto p-3.5 bg-gradient-to-b from-slate-900 to-slate-950">
+        <!-- App Views injected here -->
+      </div>
+
+      <!-- Phone Bottom Home Indicator -->
+      <div class="py-2 bg-slate-950 flex justify-center">
+        <div class="w-28 h-1 bg-slate-600 rounded-full"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 3: INTERACTION DIALOG (Wheelchair / Transfer / Colleague) ================= -->
+  <div id="interactionModal" class="hidden fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-600 rounded-2xl w-full max-w-md p-5 shadow-2xl space-y-4">
+      <div class="flex items-center gap-3">
+        <div id="interIcon" class="text-3xl bg-slate-800 w-12 h-12 rounded-xl flex items-center justify-center border border-slate-700">♿️</div>
+        <div>
+          <h3 id="interTitle" class="font-black text-base sm:text-lg text-white">核對輪椅乘客資料</h3>
+          <p id="interSubtitle" class="text-xs text-slate-400">請核對乘客姓名是否與 PIL 名單相符</p>
+        </div>
+      </div>
+      <div id="interBody" class="bg-slate-800/80 border border-slate-700 rounded-xl p-3.5 text-xs sm:text-sm text-slate-200 space-y-1.5">
+      </div>
+      <div id="interButtons" class="flex flex-col sm:flex-row gap-2 pt-1">
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 4: START / STAGE TRANSITION / SUMMARY ================= -->
+  <div id="overlayModal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-3xl w-full max-w-xl p-6 shadow-2xl space-y-5 text-center">
+      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 text-xs font-bold">
+        <span>✈️ HONG KONG INTERNATIONAL AIRPORT (VHHH / HKG)</span>
+      </div>
+      <h1 id="overlayTitle" class="text-2xl sm:text-3xl font-black text-white tracking-tight">HKG 機場地勤日常模擬器</h1>
+      <div id="overlayDesc" class="text-left bg-slate-800/80 border border-slate-700 rounded-2xl p-4 text-xs sm:text-sm text-slate-200 space-y-2 leading-relaxed">
+        <p class="font-bold text-amber-300">歡迎返工！今日你負責處理一班由到港至離港轉飛的客機：</p>
+        <ul class="list-disc pl-5 space-y-1 text-slate-300">
+          <li><strong class="text-white">第一關（到達前準備）：</strong>查閱 PIL 特別名單，用手機 <code class="text-sky-300">Allxxxx</code> 預約輪椅、用 <code class="text-sky-300">Airline Ops</code> 聯絡急需轉機航空（收到 👌🏻 代表等埋；收到 👋🏻 需交畀入境同事），並留意 10% 機率出現嘅白車/醫療協助。</li>
+          <li><strong class="text-white">第二關（到達閘口接機）：</strong>旅客落機後協助頭頂有 <code class="text-amber-300">❓</code> 嘅特別乘客：核對輪椅姓名、用 <code class="text-sky-300">HKG</code> App 查詢轉機閘口/行李帶號碼（頭頂彈出數字）、帶搵廁所乘客行入右下角 <code class="text-emerald-300">🚻</code> 方格，直至所有乘客完全離開畫面！</li>
+          <li><strong class="text-white">第三關（離港登機閘口）：</strong>核對離港輪椅及 PIL、帶 <code class="text-amber-300">🛂</code> 乘客到櫃枱用相機比對護照與 Visa、依顯示屏 <code class="text-sky-300">Zone C ➔ B ➔ A</code> 分流排隊（商務艙貴賓出現 7 秒內必須優先帶入左邊通道！）、最後 <code class="text-rose-400">Final Call</code> 收集所有剩餘乘客登機。</li>
+        </ul>
+        <p class="text-[11px] text-slate-400 pt-1">🎮 操作方式：鍵盤 <strong class="text-slate-200">WASD / 方向鍵</strong> 移動，或直接 <strong class="text-slate-200">點擊/觸控畫面地面</strong> 行走及互動。</p>
+      </div>
+      <button id="btnOverlayAction" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 active:scale-98 text-white font-black text-base sm:text-lg shadow-xl transition cursor-pointer">
+        打卡返工！開始第一關
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * ============================================================================
+     * HKG 機場地勤日常模擬器 (Hong Kong International Airport Ground Staff Simulator)
+     * Complete Single-File 2.5D Simulation Engine
+     * ============================================================================
+     */
+
+    // --- Web Audio API Sound Synthesizer (No external audio files needed) ---
+    const SoundFX = (() => {
+      let ctx = null;
+      function ensureCtx() {
+        if (!ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) ctx = new AudioCtx();
+        }
+        if (ctx && ctx.state === 'suspended') ctx.resume();
+      }
+      function playTone(freq, type = 'sine', duration = 0.15, delay = 0, vol = 0.12) {
+        try {
+          ensureCtx();
+          if (!ctx) return;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = type;
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+          gain.gain.setValueAtTime(vol, ctx.currentTime + delay);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + duration);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + delay);
+          osc.stop(ctx.currentTime + delay + duration);
+        } catch (e) { /* Ignore audio errors if blocked */ }
+      }
+      return {
+        chime() { // HKG PA Ding-Dong
+          playTone(659.25, 'sine', 0.35, 0, 0.14);
+          playTone(523.25, 'sine', 0.55, 0.28, 0.14);
+        },
+        success() {
+          playTone(587.33, 'triangle', 0.14, 0, 0.13);
+          playTone(880, 'triangle', 0.25, 0.12, 0.14);
+        },
+        error() {
+          playTone(220, 'sawtooth', 0.2, 0, 0.14);
+          playTone(175, 'sawtooth', 0.3, 0.18, 0.14);
+        },
+        shutter() {
+          playTone(1200, 'square', 0.05, 0, 0.08);
+          playTone(800, 'square', 0.06, 0.05, 0.08);
+        },
+        alert() {
+          playTone(880, 'square', 0.12, 0, 0.12);
+          playTone(880, 'square', 0.12, 0.18, 0.12);
+        }
+      };
+    })();
+
+    // --- Real HKG Data Pools ---
+    const HKG_GATES = [
+      ...Array.from({ length: 36 }, (_, i) => i + 1),
+      511, 512, 513, 514, 515,
+      520, 521, 522, 523, 524, 525,
+      ...Array.from({ length: 19 }, (_, i) => i + 201),
+      228, 229, 230
+    ];
+
+    const FLIGHT_TEMPLATES = [
+      { no: 'CX888', airline: 'Cathay Pacific', origin: 'YVR 溫哥華', dest: 'JFK 紐約' },
+      { no: 'CX504', airline: 'Cathay Pacific', origin: 'NRT 東京成田', dest: 'NRT 東京成田' },
+      { no: 'UO624', airline: 'HK Express', origin: 'KIX 大阪關西', dest: 'FUK 福岡' },
+      { no: 'HX236', airline: 'Hong Kong Airlines', origin: 'PVG 上海浦東', dest: 'TPE 台北桃園' },
+      { no: 'CX251', airline: 'Cathay Pacific', origin: 'LHR 倫敦希斯路', dest: 'LHR 倫敦希斯路' },
+      { no: 'CX715', airline: 'Cathay Pacific', origin: 'SIN 新加坡', dest: 'BKK 曼谷' }
+    ];
+
+    const CONNECTING_TEMPLATES = [
+      { no: 'CX520', airline: 'Cathay Pacific', dest: 'NRT 東京成田' },
+      { no: 'CX408', airline: 'Cathay Pacific', dest: 'TPE 台北桃園' },
+      { no: 'UO870', airline: 'HK Express', dest: 'HND 東京羽田' },
+      { no: 'HX707', airline: 'Hong Kong Airlines', dest: 'DPS 峇里島' },
+      { no: 'CX101', airline: 'Cathay Pacific', dest: 'SYD 悉尼' },
+      { no: 'CX659', airline: 'Cathay Pacific', dest: 'SIN 新加坡' }
+    ];
+
+    const PAX_NAMES = [
+      { name: 'CHAN, TAI MAN', gender: 'M', face: '👨🏻' },
+      { name: 'WONG, SIU MING', gender: 'M', face: '👴🏻' },
+      { name: 'LEE, KA YAN', gender: 'F', face: '👩🏻' },
+      { name: 'CHEUNG, MEI LING', gender: 'F', face: '👵🏻' },
+      { name: 'LAU, CHI KEUNG', gender: 'M', face: '🧔🏻' },
+      { name: 'NG, WING SZE', gender: 'F', face: '👩🏻‍💼' },
+      { name: 'HO, MAN KIT', gender: 'M', face: '👨🏻‍💼' },
+      { name: 'LAM, HOI YING', gender: 'F', face: '👱🏻‍♀️' },
+      { name: 'CHENG, YAT LONG', gender: 'M', face: '🧑🏻' },
+      { name: 'KWOK, CHING MAN', gender: 'F', face: '👩🏻‍🦱' }
+    ];
+
+    // --- Game State ---
+    const state = {
+      stage: 1, // 1: Pre-Arrival, 2: Arrival Gate, 3: Departure Gate
+      score: 100,
+      complaints: 0,
+      pilRead: false,
+      activePhoneApp: 'HOME', // HOME, ALLXXXX, AIRLINE_OPS, HKG, DOC_CHECK
+      currentDocPaxId: null,
+      docViewTab: 'PASSPORT', // PASSPORT or VISA
+
+      // Flight Data
+      arrFlight: null,
+      depFlight: null,
+      gateNo: 24,
+      transferFlights: [],
+
+      // Stage 1 Checklist
+      s1Wheelchairs: [], // { id, name, code, narrowAisle, transfer, booked }
+      s1UrgentTransfer: null, // { flightNo, dest, count, contacted, decision: 'WAIT'|'NO_WAIT', handedOver }
+      s1AmbulanceNeeded: false, // 10% chance
+      s1AmbulanceCalled: false,
+      s1SpecialNotes: [], // VIP, UM, MAAS
+
+      // Player Entity
+      player: {
+        x: 400,
+        y: 420,
+        targetX: null,
+        targetY: null,
+        speed: 255,
+        headBubble: null, // e.g., { text: 'GATE 512', color: '#38bdf8', timer: 12 }
+        finalCall: false
+      },
+
+      // Input
+      keys: {},
+
+      // Stage 2 Entities
+      stage2SpecialQueue: [],
+      stage2SpawnTimer: 1.5,
+      stage2NormalSpawnTimer: 0.4,
+      stage2Clearing: false,
+      stage2CompletedCount: 0,
+      stage2TotalSpecial: 0,
+      normalPax: [],
+      specialPax: [],
+      toiletZone: { x: 0, y: 0, w: 46, h: 46 }, // ~1cm x 1cm bottom right
+
+      // Stage 3 Entities & Phases
+      // Phases: 'PREP_DOC_WC' (STD -50m to -40m) -> 'ZONE_QUEUE' (STD -40m to -30m) -> 'BOARDING' (STD -30m to -20m) -> 'FINAL_CALL' (STD -20m) -> 'DONE'
+      s3Phase: 'PREP_DOC_WC',
+      s3Wheelchairs: [],
+      s3DocPax: [],
+      s3QueuePax: [], // Business + Zone C/B/A passengers
+      s3CurrentZone: 'C', // C -> B -> A
+      s3ZoneTimer: 20,
+      s3BizAlertActive: false,
+      s3BizPaxId: null,
+      s3BizTimer: 7.0,
+      s3BizTriggeredOnce: false,
+      s3BoardingTimer: 0,
+      counterPos: { x: 0, y: 0 },
+      bizQueuePos: { x: 0, y: 0 },
+      econQueuePos: { x: 0, y: 0 },
+      boardingGateDoor: { x: 0, y: 0 }
+    };
+
+    // --- DOM Elements ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const elHudStageBadge = document.getElementById('hudStageBadge');
+    const elHudStageName = document.getElementById('hudStageName');
+    const elHudFlightNo = document.getElementById('hudFlightNo');
+    const elHudGateNo = document.getElementById('hudGateNo');
+    const elHudClock = document.getElementById('hudClock');
+    const elHudObjective = document.getElementById('hudObjective');
+    const elHudScore = document.getElementById('hudScore');
+    const elHudComplaints = document.getElementById('hudComplaints');
+    const elPilUnreadDot = document.getElementById('pilUnreadDot');
+
+    const elPilModal = document.getElementById('pilModal');
+    const elPilContent = document.getElementById('pilContent');
+    const elPilSubHeader = document.getElementById('pilSubHeader');
+
+    const elPhoneModal = document.getElementById('phoneModal');
+    const elPhoneBody = document.getElementById('phoneBody');
+    const elPhoneAppTitle = document.getElementById('phoneAppTitle');
+
+    const elInterModal = document.getElementById('interactionModal');
+    const elInterIcon = document.getElementById('interIcon');
+    const elInterTitle = document.getElementById('interTitle');
+    const elInterSubtitle = document.getElementById('interSubtitle');
+    const elInterBody = document.getElementById('interBody');
+    const elInterButtons = document.getElementById('interButtons');
+
+    const elOverlayModal = document.getElementById('overlayModal');
+    const elOverlayTitle = document.getElementById('overlayTitle');
+    const elOverlayDesc = document.getElementById('overlayDesc');
+    const elBtnOverlayAction = document.getElementById('btnOverlayAction');
+
+    const elBtnDocCheckTrigger = document.getElementById('btnDocCheckTrigger');
+    const elBtnStartStage2 = document.getElementById('btnStartStage2');
+    const elBtnStartStage3 = document.getElementById('btnStartStage3');
+    const elBizAlertBanner = document.getElementById('bizAlertBanner');
+    const elBizCountdownText = document.getElementById('bizCountdownText');
+
+    // --- Utility Functions ---
+    function pickRandom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const div = document.createElement('div');
+      const styles = {
+        info: 'bg-slate-800/95 border-sky-400 text-sky-100',
+        success: 'bg-emerald-950/95 border-emerald-400 text-emerald-100',
+        error: 'bg-rose-950/95 border-rose-400 text-rose-100',
+        warn: 'bg-amber-950/95 border-amber-400 text-amber-100'
+      };
+      div.className = `px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-bold shadow-xl backdrop-blur-md transition-all duration-300 ${styles[type] || styles.info}`;
+      div.textContent = msg;
+      container.appendChild(div);
+      setTimeout(() => {
+        div.style.opacity = '0';
+        div.style.transform = 'translateX(20px)';
+        setTimeout(() => div.remove(), 300);
+      }, 3400);
+    }
+
+    function addScore(delta, reason) {
+      state.score = Math.max(0, state.score + delta);
+      if (delta < 0) {
+        state.complaints += 1;
+        SoundFX.error();
+        showToast(`⚠️ 扣 ${Math.abs(delta)} 分（投訴 +1）：${reason}`, 'error');
+      } else {
+        SoundFX.success();
+        showToast(`✅ +${delta} 分：${reason}`, 'success');
+      }
+      updateHud();
+    }
+
+    function updateHud() {
+      elHudScore.textContent = state.score;
+      elHudComplaints.textContent = state.complaints;
+      elHudGateNo.textContent = `GATE ${state.gateNo}`;
+
+      if (state.stage === 1) {
+        elHudStageBadge.textContent = 'STAGE 1/3';
+        elHudStageName.textContent = '到達前準備';
+        elHudFlightNo.textContent = `${state.arrFlight.no} (${state.arrFlight.origin.split(' ')[0]}→HKG)`;
+        elHudClock.textContent = 'ETA -15m';
+      } else if (state.stage === 2) {
+        elHudStageBadge.textContent = 'STAGE 2/3';
+        elHudStageName.textContent = '到達閘口接機';
+        elHudFlightNo.textContent = `${state.arrFlight.no} 落機中`;
+        elHudClock.textContent = 'ATA 00m';
+      } else if (state.stage === 3) {
+        elHudStageBadge.textContent = 'STAGE 3/3';
+        elHudStageName.textContent = '離港登機閘口';
+        elHudFlightNo.textContent = `${state.depFlight.no} (HKG→${state.depFlight.dest.split(' ')[0]})`;
+        if (state.s3Phase === 'PREP_DOC_WC') elHudClock.textContent = 'STD -48m';
+        else if (state.s3Phase === 'ZONE_QUEUE') elHudClock.textContent = 'STD -40m';
+        else if (state.s3Phase === 'BOARDING') elHudClock.textContent = 'STD -30m';
+        else elHudClock.textContent = 'STD -20m (FINAL)';
+      }
+    }
+
+    // --- Resize & Layout Anchors ---
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Stage 2 Toilet Logo at bottom right (~1cm x 1cm = 46px x 46px)
+      state.toiletZone = {
+        x: w - 64,
+        y: h - 64,
+        w: 46,
+        h: 46
+      };
+
+      // Stage 3 Anchors
+      state.counterPos = { x: w * 0.5, y: h * 0.25 };
+      state.bizQueuePos = { x: w * 0.26, y: h * 0.34 };
+      state.econQueuePos = { x: w * 0.74, y: h * 0.34 };
+      state.boardingGateDoor = { x: w * 0.5, y: h * 0.11 };
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // --- Initialize Full Flight Scenario ---
+    function initNewShift() {
+      resizeCanvas();
+      state.stage = 1;
+      state.score = 100;
+      state.complaints = 0;
+      state.pilRead = false;
+      elPilUnreadDot.classList.remove('hidden');
+
+      const arrTpl = pickRandom(FLIGHT_TEMPLATES);
+      const depTpl = FLIGHT_TEMPLATES.find(f => f.no !== arrTpl.no) || FLIGHT_TEMPLATES[1];
+      state.gateNo = pickRandom(HKG_GATES);
+
+      state.arrFlight = {
+        ...arrTpl,
+        belt: Math.floor(Math.random() * 16) + 1
+      };
+      state.depFlight = {
+        ...depTpl,
+        gate: state.gateNo
+      };
+
+      // Generate Transfer Flights with distinct gates
+      const usedGates = new Set([state.gateNo]);
+      state.transferFlights = CONNECTING_TEMPLATES.slice(0, 4).map(tf => {
+        let g = pickRandom(HKG_GATES);
+        while (usedGates.has(g)) g = pickRandom(HKG_GATES);
+        usedGates.add(g);
+        return { ...tf, gate: g };
+      });
+
+      // Stage 1 Wheelchairs (1 to 2 pax)
+      const wcCodes = ['WCHR', 'WCHS', 'WCHC'];
+      const shuffledNames = [...PAX_NAMES].sort(() => Math.random() - 0.5);
+      const wcCount = Math.random() < 0.55 ? 2 : 1;
+      state.s1Wheelchairs = [];
+      for (let i = 0; i < wcCount; i++) {
+        const code = pickRandom(wcCodes);
+        const narrowAisle = code === 'WCHC' ? true : (code === 'WCHR' ? false : Math.random() < 0.4);
+        const transfer = Math.random() < 0.5;
+        state.s1Wheelchairs.push({
+          id: `wc_${i}`,
+          name: shuffledNames[i].name,
+          gender: shuffledNames[i].gender,
+          face: shuffledNames[i].face,
+          code,
+          narrowAisle,
+          transfer,
+          booked: false
+        });
+      }
+
+      // Stage 1 Urgent Transfer
+      const urgentTf = state.transferFlights[0];
+      state.s1UrgentTransfer = {
+        flightNo: urgentTf.no,
+        airline: urgentTf.airline,
+        dest: urgentTf.dest,
+        count: Math.floor(Math.random() * 3) + 2, // 2-4 pax
+        contacted: false,
+        decision: null, // 'WAIT' (👌🏻) or 'NO_WAIT' (👋🏻)
+        handedOver: false
+      };
+
+      // 10% chance Ambulance / MEDA
+      state.s1AmbulanceNeeded = Math.random() < 0.10;
+      state.s1AmbulanceCalled = false;
+
+      // Extra realistic PIL notes (VIP, UM, MAAS)
+      state.s1SpecialNotes = [
+        { code: 'VIP', desc: `商務艙 2A (${shuffledNames[4].name}) — 航空公司鑽石卡會員，需優先跟進` },
+        { code: 'UM', desc: `經濟艙 18K (CHOW, SZE HANG) — 無成人陪伴兒童，落機需核對接機人證件` },
+        { code: 'MAAS', desc: `經濟艙 24C (${shuffledNames[5].name}) — 首次乘機長者，需特別協助指引` }
+      ];
+      if (state.s1AmbulanceNeeded) {
+        state.s1SpecialNotes.unshift({
+          code: '🚑 MEDA / AMBULANCE',
+          desc: `緊急醫療通知：座位 14A 乘客出現急性胸痛，落機需即時安排機場救護車（白車）戒備！`
+        });
+      }
+
+      // Position Player in Stage 1 Prep Area
+      state.player.x = canvas.width * 0.5;
+      state.player.y = canvas.height * 0.58;
+      state.player.targetX = null;
+      state.player.targetY = null;
+      state.player.headBubble = null;
+      state.player.finalCall = false;
+
+      elBtnStartStage2.classList.add('hidden');
+      elBtnStartStage3.classList.add('hidden');
+      elBtnDocCheckTrigger.classList.add('hidden');
+      elBizAlertBanner.classList.add('hidden');
+
+      updateHud();
+      checkStage1Completion();
+    }
+
+    // --- Check Stage 1 Completion ---
+    function checkStage1Completion() {
+      if (state.stage !== 1) return;
+      const allWcDone = state.s1Wheelchairs.every(w => w.booked);
+      const tf = state.s1UrgentTransfer;
+      const tfDone = tf.contacted && (tf.decision === 'WAIT' || tf.handedOver);
+      const ambDone = !state.s1AmbulanceNeeded || state.s1AmbulanceCalled;
+
+      const missing = [];
+      if (!state.pilRead) missing.push('查閱 PIL');
+      if (!allWcDone) missing.push(`Allxxxx 預約輪椅 (${state.s1Wheelchairs.filter(w => w.booked).length}/${state.s1Wheelchairs.length})`);
+      if (!tf.contacted) missing.push('Airline Ops 聯絡轉機航空');
+      else if (tf.decision === 'NO_WAIT' && !tf.handedOver) missing.push('交由入境同事處理唔等轉機客');
+      if (!ambDone) missing.push('呼叫白車 (MEDA)');
+
+      if (missing.length === 0) {
+        elHudObjective.innerHTML = '✅ 到達前準備全部完成！請按下方按鈕「航班已泊橋，開始落機」';
+        elBtnStartStage2.classList.remove('hidden');
+      } else {
+        elHudObjective.innerHTML = `📋 待辦事項：${missing.join(' ｜ ')}`;
+        elBtnStartStage2.classList.add('hidden');
+      }
+    }
+
+    // --- Transition to Stage 2: Arrival Gate ---
+    function startStage2() {
+      SoundFX.chime();
+      state.stage = 2;
+      elBtnStartStage2.classList.add('hidden');
+      state.player.x = canvas.width * 0.5;
+      state.player.y = canvas.height * 0.52;
+      state.player.targetX = null;
+      state.player.targetY = null;
+
+      state.normalPax = [];
+      state.specialPax = [];
+      state.stage2Clearing = false;
+      state.stage2CompletedCount = 0;
+
+      // Build Stage 2 Special Needs Queue:
+      // 1. Valid Wheelchairs from PIL + 1 Impostor Wheelchair
+      // 2. 3 to 5 Toilet Inquiries
+      // 3. 4 to 6 Transfer Gate / Baggage Belt Inquiries
+      const queue = [];
+
+      state.s1Wheelchairs.forEach(wc => {
+        queue.push({
+          type: 'WC',
+          valid: true,
+          name: wc.name,
+          code: wc.code,
+          face: wc.face
+        });
+      });
+      // Add 1 impostor wheelchair passenger
+      queue.push({
+        type: 'WC',
+        valid: false,
+        name: 'TANG, YIU MING',
+        code: 'WCHR',
+        face: '👨🏻‍🦯'
+      });
+
+      // 3 to 5 Toilet passengers
+      const toiletCount = 3 + Math.floor(Math.random() * 3);
+      const toiletFaces = ['🧑🏻', '👩🏻', '👨🏻', '👱🏻‍♀️', '🧔🏻'];
+      for (let i = 0; i < toiletCount; i++) {
+        queue.push({
+          type: 'TOILET',
+          face: toiletFaces[i % toiletFaces.length]
+        });
+      }
+
+      // 4 to 6 Transfer Gate / Baggage Belt inquiries
+      const infoCount = 4 + Math.floor(Math.random() * 3);
+      const tfFaces = ['👩🏻‍💼', '👨🏻‍💼', '🧑🏻‍🎓', '👩🏻‍🦰', '👨🏻‍🦱'];
+      const bagFaces = ['👴🏻', '👵🏻', '👩🏻‍🎨', '👨🏻‍🔧', '🧑🏻‍🍳'];
+      for (let i = 0; i < infoCount; i++) {
+        const isTransfer = i === 0 ? true : (i === 1 ? false : Math.random() < 0.5);
+        if (isTransfer) {
+          const tf = pickRandom(state.transferFlights);
+          queue.push({
+            type: 'TRANSFER_GATE',
+            flightNo: tf.no,
+            dest: tf.dest,
+            gate: tf.gate,
+            face: tfFaces[i % tfFaces.length]
+          });
+        } else {
+          queue.push({
+            type: 'BAG_BELT',
+            flightNo: state.arrFlight.no,
+            belt: state.arrFlight.belt,
+            face: bagFaces[i % bagFaces.length]
+          });
+        }
+      }
+
+      queue.sort(() => Math.random() - 0.5);
+      state.stage2SpecialQueue = queue;
+      state.stage2TotalSpecial = queue.length;
+      state.stage2SpawnTimer = 0.8;
+
+      updateHud();
+      elHudObjective.innerHTML = `🛬 旅客落機中！行近頭頂有「❓」嘅乘客查看需要（已協助 0/${state.stage2TotalSpecial}）`;
+      showToast('🛬 艙門已開啟！旅客陸續落機，請協助特別需要乘客。', 'info');
+    }
+
+    function spawnNormalArrivalPax() {
+      const bridgeX = canvas.width * 0.5 + (Math.random() - 0.5) * 90;
+      const faces = ['🚶🏻', '🚶🏻‍♀️', '🧑🏻', '👩🏻', '👨🏻', '👱🏻‍♂️', '👩🏻‍🦱'];
+      state.normalPax.push({
+        x: bridgeX,
+        y: canvas.height * 0.16,
+        vx: (Math.random() - 0.5) * 45,
+        vy: 68 + Math.random() * 32,
+        face: pickRandom(faces),
+        wobble: Math.random() * Math.PI * 2
+      });
+    }
+
+    function spawnNextSpecialArrivalPax() {
+      if (state.stage2SpecialQueue.length === 0) return;
+      const data = state.stage2SpecialQueue.shift();
+      const bridgeX = canvas.width * 0.5 + (Math.random() - 0.5) * 60;
+      state.specialPax.push({
+        ...data,
+        id: 'sp_' + Math.random().toString(36).slice(2, 8),
+        x: bridgeX,
+        y: canvas.height * 0.18,
+        targetX: canvas.width * (0.22 + Math.random() * 0.56),
+        targetY: canvas.height * (0.34 + Math.random() * 0.42),
+        revealed: false, // Becomes true when player gets close ('❓' -> specific emoji)
+        following: false, // Used for TOILET escort
+        leaving: false,   // Walks out bottom of screen when resolved
+        wanderTimer: 2 + Math.random() * 2
+      });
+    }
+
+    function resolveSpecialArrivalPax(pax, successMsg) {
+      pax.leaving = true;
+      pax.following = false;
+      state.stage2CompletedCount += 1;
+      addScore(5, successMsg);
+
+      const remaining = state.stage2SpecialQueue.length + state.specialPax.filter(p => !p.leaving).length;
+      if (remaining === 0) {
+        state.stage2Clearing = true;
+        elHudObjective.innerHTML = '✅ 所有特別乘客已協助！請按下方按鈕「前往第三關」繼續';
+        elBtnStartStage3.classList.remove('hidden');
+        showToast('👏🏻 所有特別乘客已處理完畢！你可以隨時按下方按鈕前往第三關。', 'success');
+      } else {
+        elHudObjective.innerHTML = `🛬 協助特別需要乘客（已完成 ${state.stage2CompletedCount}/${state.stage2TotalSpecial}）`;
+      }
+    }
+
+    // --- Transition to Stage 3: Departure Gate ---
+    function startStage3() {
+      SoundFX.chime();
+      state.stage = 3;
+      elBtnStartStage3.classList.add('hidden');
+      state.s3Phase = 'PREP_DOC_WC';
+      state.player.x = canvas.width * 0.5;
+      state.player.y = canvas.height * 0.55;
+      state.player.targetX = null;
+      state.player.targetY = null;
+      state.player.headBubble = null;
+      state.player.finalCall = false;
+
+      // Helper to generate non-overlapping randomized floor coordinates in Stage 3
+      const usedCoords = [
+        { x: state.player.x, y: state.player.y },
+        { x: state.counterPos.x, y: state.counterPos.y },
+        { x: state.bizQueuePos.x, y: state.bizQueuePos.y },
+        { x: state.econQueuePos.x, y: state.econQueuePos.y }
+      ];
+      function randomStage3Spot() {
+        for (let attempt = 0; attempt < 40; attempt++) {
+          const rx = canvas.width * (0.14 + Math.random() * 0.72);
+          const ry = canvas.height * (0.48 + Math.random() * 0.40);
+          const tooClose = usedCoords.some(pt => Math.hypot(rx - pt.x, ry - pt.y) < 58);
+          if (!tooClose) {
+            usedCoords.push({ x: rx, y: ry });
+            return { x: rx, y: ry };
+          }
+        }
+        return {
+          x: canvas.width * (0.15 + Math.random() * 0.70),
+          y: canvas.height * (0.50 + Math.random() * 0.36)
+        };
+      }
+
+      // Refresh PIL for Departure Flight
+      state.pilRead = false;
+      elPilUnreadDot.classList.remove('hidden');
+
+      const shuffled = [...PAX_NAMES].sort(() => Math.random() - 0.5);
+      // Departure Wheelchairs (1 valid from PIL, 1 invalid/not booked) at randomized spots
+      const wcSpot1 = randomStage3Spot();
+      const depWc = {
+        id: 'dep_wc_0',
+        name: shuffled[0].name,
+        code: 'WCHR',
+        narrowAisle: false,
+        transfer: false,
+        valid: true,
+        face: '🧑🏻‍🦽',
+        x: wcSpot1.x,
+        y: wcSpot1.y,
+        resolved: false
+      };
+      const wcSpot2 = randomStage3Spot();
+      const fakeDepWc = {
+        id: 'dep_wc_1',
+        name: 'FUNG, SIU LUNG',
+        code: 'WCHS',
+        valid: false,
+        face: '👨🏻‍🦯',
+        x: wcSpot2.x,
+        y: wcSpot2.y,
+        resolved: false
+      };
+      state.s1Wheelchairs = [depWc]; // Update PIL reference for Departure
+      state.s3Wheelchairs = [depWc, fakeDepWc];
+
+      // Departure Special Notes (including 10% chance ambulance)
+      state.s1AmbulanceNeeded = Math.random() < 0.10;
+      state.s1AmbulanceCalled = false;
+      state.s1SpecialNotes = [
+        { code: 'VIP', desc: `商務艙 1A (${shuffled[1].name}) — 貴賓室貴賓，優先登機` },
+        { code: 'UM', desc: `經濟艙 12A (LO, TSZ CHING) — 無成人陪伴兒童，需由地勤護送上機` },
+        { code: 'MAAS', desc: `經濟艙 20F (${shuffled[2].name}) — 需協助確認登機證及座位` }
+      ];
+      if (state.s1AmbulanceNeeded) {
+        state.s1SpecialNotes.unshift({
+          code: '🚑 MEDA / AMBULANCE',
+          desc: `登機閘口突發：座位 9C 乘客暈眩不適，需立即通知機場白車到場評估！`
+        });
+      }
+
+      // 3 Doc Check Passengers (🛂) at randomized spots
+      const docSpot1 = randomStage3Spot();
+      const docSpot2 = randomStage3Spot();
+      const docSpot3 = randomStage3Spot();
+      // 3 Doc Check Passengers (🛂) at randomized spots with randomized mismatch types (Name / Gender / Passport No.)
+      const docConfigs = [true, false, Math.random() < 0.5].sort(() => Math.random() - 0.5);
+      const mismatchTypes = ['NAME', 'GENDER', 'PASSPORT_NO'];
+      const passportPool = ['H08924152', 'K44192088', 'P77310594'];
+
+      state.s3DocPax = docConfigs.map((isMatch, i) => {
+        const person = shuffled[3 + i];
+        const spot = randomStage3Spot();
+        const pNo = passportPool[i];
+        let visaName = person.name;
+        let visaGender = person.gender;
+        let visaPassportNo = pNo;
+        let mismatchReason = '';
+
+        if (!isMatch) {
+          const mType = pickRandom(mismatchTypes);
+          if (mType === 'NAME') {
+            // Alter one letter in surname/given name
+            visaName = person.name.replace(/A/g, 'E') !== person.name
+              ? person.name.replace('A', 'E')
+              : person.name.replace('I', 'Y');
+            if (visaName === person.name) visaName = person.name + 'G';
+            mismatchReason = '簽證姓名拼寫與護照不符';
+          } else if (mType === 'GENDER') {
+            visaGender = person.gender === 'M' ? 'F' : 'M';
+            mismatchReason = '簽證性別 (M/F) 與護照不符';
+          } else {
+            visaPassportNo = pNo.slice(0, -2) + '99';
+            mismatchReason = '簽證關聯護照號碼與護照不符';
+          }
+        }
+
+        return {
+          id: `doc_${i + 1}`,
+          name: person.name,
+          gender: person.gender,
+          face: person.face,
+          passportNo: pNo,
+          visaName,
+          visaGender,
+          visaPassportNo,
+          visaValid: 'VALID UNTIL 2029-11',
+          isMatch,
+          mismatchReason,
+          x: spot.x,
+          y: spot.y,
+          following: false,
+          resolved: false
+        };
+      });
+
+      // Boarding Passengers (Business, Zone C, Zone B, Zone A + hidden Final Call stragglers)
+      state.s3QueuePax = [];
+      const zones = [
+        { zone: 'BIZ', count: 3, faces: ['🤵🏻', '👩🏻‍💼', '👨🏻‍💼'] },
+        { zone: 'C', count: 5, faces: ['🧑🏻', '👩🏻', '👨🏻', '👱🏻‍♀️', '🧔🏻'] },
+        { zone: 'B', count: 5, faces: ['👩🏻‍🦰', '👨🏻‍🦱', '🧑🏻‍🎓', '👩🏻‍🎨', '👨🏻‍🔧'] },
+        { zone: 'A', count: 4, faces: ['👴🏻', '👵🏻', '🧑🏻‍🍳', '👱🏻‍♂️'] }
+      ];
+
+      let idx = 0;
+      zones.forEach(group => {
+        for (let i = 0; i < group.count; i++) {
+          const spot = randomStage3Spot();
+          state.s3QueuePax.push({
+            id: `bpax_${idx++}`,
+            zone: group.zone, // 'BIZ', 'C', 'B', 'A'
+            face: group.faces[i % group.faces.length],
+            x: spot.x,
+            y: spot.y,
+            state: 'WAITING', // WAITING, FOLLOWING, QUEUED, BOARDING, BOARDED, STRAGGLER
+            hiddenBiz: (group.zone === 'BIZ' && i === 2), // 1 Business Class pax pops up mid-Zone queuing!
+            queueSlot: 0
+          });
+        }
+      });
+
+      // Generate 4 to 6 Final Call stragglers across mixed zones (BIZ, A, B, C)
+      const stragglerCount = 4 + Math.floor(Math.random() * 3); // 4-6 pax
+      const mixedZonePool = ['BIZ', 'A', 'B', 'C'];
+      const stragglerFaces = ['🏃🏻', '🏃🏻‍♀️', '🧳', '👨🏻‍💼', '👩🏻‍💼', '🧑🏻', '👩🏻'];
+      for (let s = 0; s < stragglerCount; s++) {
+        const z = pickRandom(mixedZonePool);
+        const spot = randomStage3Spot();
+        state.s3QueuePax.push({
+          id: `bpax_${idx++}`,
+          zone: z,
+          face: stragglerFaces[s % stragglerFaces.length],
+          x: spot.x,
+          y: spot.y,
+          state: 'STRAGGLER',
+          hiddenBiz: false,
+          queueSlot: 0
+        });
+      }
+
+      updateHud();
+      elHudObjective.innerHTML = '📋 起飛前 48m：先睇 PIL、核對輪椅乘客，並帶頭頂「🛂」乘客到櫃枱查核證件！';
+      showToast('🛫 已到達離港登機閘口！請先查閱 PIL、處理輪椅及證件查核 (🛂)。', 'info');
+    }
+
+    function checkStage3PrepCompletion() {
+      if (state.stage !== 3 || state.s3Phase !== 'PREP_DOC_WC') return;
+      const wcDone = state.s3Wheelchairs.every(w => w.resolved);
+      const docDone = state.s3DocPax.every(d => d.resolved);
+      const ambDone = !state.s1AmbulanceNeeded || state.s1AmbulanceCalled;
+
+      if (wcDone && docDone && ambDone) {
+        // Move to STD -40m Zone Queuing!
+        SoundFX.chime();
+        state.s3Phase = 'ZONE_QUEUE';
+        state.s3CurrentZone = 'C';
+        state.s3ZoneTimer = 20;
+        updateHud();
+        elHudObjective.innerHTML = '📢 起飛前 40m 開始排隊！左邊排 Business Class，右邊依顯示屏先帶「ZONE C」排隊（每次最多 5 人）';
+        showToast('📢 起飛前 40 分鐘！請帶 Business Class 去左邊隊伍，並依右邊顯示屏帶 Zone C 排隊！', 'info');
+      } else {
+        const remWc = state.s3Wheelchairs.filter(w => !w.resolved).length;
+        const remDoc = state.s3DocPax.filter(d => !d.resolved).length;
+        elHudObjective.innerHTML = `🛂 登機前準備：剩餘輪椅核對 (${remWc}) ｜ 證件查核 🛂 (${remDoc})${!ambDone ? ' ｜ 呼叫白車 🚑' : ''}`;
+      }
+    }
+
+    function triggerSuddenBusinessClass() {
+      const hiddenBiz = state.s3QueuePax.find(p => p.hiddenBiz && p.state === 'WAITING');
+      if (!hiddenBiz) return;
+      hiddenBiz.hiddenBiz = false;
+      hiddenBiz.x = canvas.width * 0.5;
+      hiddenBiz.y = canvas.height * 0.84;
+
+      state.s3BizAlertActive = true;
+      state.s3BizPaxId = hiddenBiz.id;
+      state.s3BizTimer = 7.0;
+      state.s3BizTriggeredOnce = true;
+
+      SoundFX.alert();
+      elBizAlertBanner.classList.remove('hidden');
+      showToast('👑 突發！有 Business Class 貴賓到達閘口，請於 7 秒內優先帶佢去左邊商務艙隊伍！', 'warn');
+    }
+
+    function startStage3Boarding() {
+      SoundFX.chime();
+      state.s3Phase = 'BOARDING';
+      state.s3BizAlertActive = false;
+      elBizAlertBanner.classList.add('hidden');
+      updateHud();
+      elHudObjective.innerHTML = '🛫 起飛前 30m 正式登機！排隊乘客正依 Business ➔ Zone C ➔ Zone B ➔ Zone A 次序上機...';
+      showToast('🛫 閘門開啟！排隊乘客依 Business → C → B → A 次序登機！', 'success');
+    }
+
+    function startStage3FinalCall() {
+      SoundFX.alert();
+      state.s3Phase = 'FINAL_CALL';
+      state.player.finalCall = true;
+      state.s3QueuePax.forEach(p => {
+        if (p.state === 'STRAGGLER' || p.state === 'WAITING') {
+          p.state = 'WAITING';
+          p.hiddenBiz = false;
+          // Appear at randomized spots in the gate hall only after initial passengers have boarded
+          p.x = canvas.width * (0.16 + Math.random() * 0.68);
+          p.y = canvas.height * (0.55 + Math.random() * 0.33);
+        }
+      });
+      updateHud();
+      elHudObjective.innerHTML = '🚨 起飛前 20m FINAL CALL！最後召集乘客剛趕到，請四處游走將所有乘客拉去排隊區登機！';
+      showToast('🚨 FINAL CALL！最後幾位遲到乘客剛趕到閘口，請盡快帶佢哋去登機通道！', 'warn');
+    }
+
+    function finishEntireShift() {
+      state.s3Phase = 'DONE';
+      state.player.finalCall = false;
+      SoundFX.chime();
+      SoundFX.success();
+
+      let grade = 'S';
+      let comment = '完美地勤表現！旅客對你嘅專業與效率讚不絕口！';
+      if (state.score < 60 || state.complaints >= 4) {
+        grade = 'C';
+        comment = '今日有幾單投訴，下次記得對清楚 PIL 名單同留意商務艙優先次序呀！';
+      } else if (state.score < 85 || state.complaints >= 2) {
+        grade = 'B';
+        comment = '表現唔錯，順利完成到港同離港航班任務，繼續保持！';
+      } else if (state.score < 100 || state.complaints >= 1) {
+        grade = 'A';
+        comment = '非常專業嘅 HKG 地勤表現，幾乎零失誤完成整班機！';
+      }
+
+      elOverlayTitle.textContent = `航班任務完成！綜合評級：${grade} 級`;
+      elOverlayDesc.innerHTML = `
+        <div class="text-center py-2">
+          <div class="inline-block text-4xl font-black px-5 py-2 rounded-2xl bg-amber-500/20 border border-amber-400 text-amber-300 mb-2">
+            最終服務評分：${state.score} 分
+          </div>
+          <p class="text-sm text-slate-300">收到投訴次數：<strong class="text-rose-400">${state.complaints} 次</strong></p>
+        </div>
+        <div class="bg-slate-900/90 border border-slate-700 rounded-xl p-3.5 space-y-1.5 text-xs sm:text-sm">
+          <p>✈️ <strong>處理到港航班：</strong>${state.arrFlight.no} (${state.arrFlight.origin} → HKG) ｜ 行李帶 ${state.arrFlight.belt}</p>
+          <p>🛫 <strong>處理離港航班：</strong>${state.depFlight.no} (HKG → ${state.depFlight.dest}) ｜ 閘口 ${state.gateNo}</p>
+          <p class="text-sky-300 pt-1">💬 <strong>值班經理評語：</strong>${comment}</p>
+        </div>
+      `;
+      elBtnOverlayAction.textContent = '🔄 接下一班機（重新開始）';
+      elOverlayModal.classList.remove('hidden');
+    }
+
+    // --- PIL Modal Rendering ---
+    function openPilModal() {
+      state.pilRead = true;
+      elPilUnreadDot.classList.add('hidden');
+      const flight = state.stage <= 2 ? state.arrFlight : state.depFlight;
+      const modeLabel = state.stage <= 2 ? '到港航班 (ARRIVAL)' : '離港航班 (DEPARTURE)';
+
+      elPilSubHeader.textContent = `${modeLabel} ｜ 航班 ${flight.no} ｜ 閘口 GATE ${state.gateNo}`;
+
+      let html = `
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-800/90 p-3 rounded-xl border border-slate-700">
+          <div><span class="text-slate-400 text-xs block">航班編號</span><strong class="text-sky-400">${flight.no}</strong></div>
+          <div><span class="text-slate-400 text-xs block">停泊閘口</span><strong class="text-emerald-400">GATE ${state.gateNo}</strong></div>
+          <div><span class="text-slate-400 text-xs block">航線</span><strong class="text-white">${state.stage <= 2 ? flight.origin + ' → HKG' : 'HKG → ' + flight.dest}</strong></div>
+          <div><span class="text-slate-400 text-xs block">行李轉盤</span><strong class="text-amber-300">Belt ${state.arrFlight.belt}</strong></div>
+        </div>
+      `;
+
+      // Section 1: Wheelchair Passengers
+      html += `
+        <div class="space-y-2">
+          <h3 class="font-extrabold text-amber-400 flex items-center gap-1.5"><span>♿️</span> 輪椅服務乘客名單 (SSR WCHR / WCHS / WCHC)</h3>
+          <div class="space-y-2">
+            ${state.s1Wheelchairs.map(w => `
+              <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div class="font-bold text-white">${w.face} ${w.name} <span class="text-xs text-slate-400">(${w.gender || 'M'})</span></div>
+                  <div class="text-xs text-slate-300 mt-0.5">
+                    類別：<span class="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold">${w.code}</span> ｜
+                    細輪 (Narrow Aisle)：<strong class="${w.narrowAisle ? 'text-rose-400' : 'text-slate-300'}">${w.narrowAisle ? '需要 (是)' : '不需要 (否)'}</strong>${state.stage <= 2 ? ` ｜
+                    轉機：<strong class="${w.transfer ? 'text-amber-300' : 'text-slate-300'}">${w.transfer ? '有轉機 (是)' : '無轉機 (否)'}</strong>` : ''}
+                  </div>
+                </div>
+                ${state.stage <= 2 ? `
+                  <span class="text-xs font-bold px-2 py-1 rounded ${w.booked ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}">
+                    ${w.booked ? '✅ 已於 Allxxxx 派單' : '⏳ 待預約'}
+                  </span>
+                ` : `
+                  <span class="text-xs font-bold px-2 py-1 rounded ${w.resolved ? 'bg-emerald-500/20 text-emerald-300' : 'bg-sky-500/20 text-sky-300'}">
+                    ${w.resolved ? '✅ 已交輪椅同事登機' : '🛫 離港登機名單'}
+                  </span>
+                `}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      // Section 2: Urgent Transfer (Relevant in Stage 1 & 2)
+      if (state.stage <= 2 && state.s1UrgentTransfer) {
+        const tf = state.s1UrgentTransfer;
+        html += `
+          <div class="space-y-2">
+            <h3 class="font-extrabold text-sky-400 flex items-center gap-1.5"><span>⏱️</span> 急需轉機乘客 (Tight Connection)</h3>
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div class="font-bold text-white">接駁航班：<span class="text-amber-300">${tf.flightNo}</span> (${tf.airline} → ${tf.dest})</div>
+                <div class="text-xs text-slate-300 mt-0.5">急需轉機人數：<strong class="text-rose-400 text-sm">${tf.count} 位乘客</strong>（需透過公司電話 Airline Ops 聯絡對方確認會否等埋）</div>
+              </div>
+              <span class="text-xs font-bold px-2 py-1 rounded ${tf.contacted ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'}">
+                ${tf.contacted ? (tf.decision === 'WAIT' ? '👌🏻 對方會等' : '👋🏻 唔等（需交入境同事）') : '📞 未聯絡'}
+              </span>
+            </div>
+          </div>
+        `;
+      }
+
+      // Section 3: Special Remarks (VIP, UM, MAAS, 10% Ambulance)
+      html += `
+        <div class="space-y-2">
+          <h3 class="font-extrabold text-indigo-300 flex items-center gap-1.5"><span>📌</span> 特別服務備註 (VIP / UM / MAAS / MEDA)</h3>
+          <div class="space-y-1.5">
+            ${state.s1SpecialNotes.map(note => {
+              const isMeda = note.code.includes('MEDA');
+              return `
+                <div class="p-2.5 rounded-xl border ${isMeda ? 'bg-rose-950/70 border-rose-500 text-rose-100' : 'bg-slate-800/70 border-slate-700 text-slate-200'} flex items-center justify-between gap-2">
+                  <div>
+                    <span class="font-black text-xs px-1.5 py-0.5 rounded ${isMeda ? 'bg-rose-600 text-white' : 'bg-indigo-600/60 text-indigo-200'} mr-1.5">${note.code}</span>
+                    <span class="text-xs">${note.desc}</span>
+                  </div>
+                  ${isMeda ? `
+                    <button onclick="callAmbulanceFromPil()" class="shrink-0 px-2.5 py-1.5 rounded-lg font-bold text-xs cursor-pointer ${state.s1AmbulanceCalled ? 'bg-emerald-600 text-white' : 'bg-rose-600 hover:bg-rose-500 text-white animate-pulse'}">
+                      ${state.s1AmbulanceCalled ? '✅ 白車已戒備' : '🚑 立即召白車'}
+                    </button>
+                  ` : ''}
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      elPilContent.innerHTML = html;
+      elPilModal.classList.remove('hidden');
+      checkStage1Completion();
+      checkStage3PrepCompletion();
+    }
+
+    window.callAmbulanceFromPil = function () {
+      if (state.s1AmbulanceCalled) return;
+      state.s1AmbulanceCalled = true;
+      addScore(10, '已即時通知 HKG 機場救護站安排白車戒備！');
+      openPilModal();
+    };
+
+    // --- Company Smartphone System ---
+    function openPhone(app = 'HOME') {
+      state.activePhoneApp = app;
+      elPhoneModal.classList.remove('hidden');
+      renderPhoneApp();
+    }
+
+    function closePhone() {
+      elPhoneModal.classList.add('hidden');
+    }
+
+    function renderPhoneApp() {
+      const app = state.activePhoneApp;
+      if (app === 'HOME') {
+        elPhoneAppTitle.textContent = 'HKG 地勤工作手機';
+        elPhoneBody.innerHTML = `
+          <div class="grid grid-cols-2 gap-3 pt-2">
+            <button onclick="switchPhoneApp('ALLXXXX')" class="flex flex-col items-center justify-center p-4 rounded-2xl bg-amber-500/20 border border-amber-400/50 hover:bg-amber-500/30 transition cursor-pointer">
+              <span class="text-3xl mb-1.5">♿️</span>
+              <span class="font-black text-sm text-amber-300">Allxxxx</span>
+              <span class="text-[11px] text-slate-400">輪椅服務派單</span>
+            </button>
+            <button onclick="switchPhoneApp('AIRLINE_OPS')" class="flex flex-col items-center justify-center p-4 rounded-2xl bg-rose-500/20 border border-rose-400/50 hover:bg-rose-500/30 transition cursor-pointer">
+              <span class="text-3xl mb-1.5">📞</span>
+              <span class="font-black text-sm text-rose-300">Airline Ops</span>
+              <span class="text-[11px] text-slate-400">聯絡轉機航空</span>
+            </button>
+            <button onclick="switchPhoneApp('HKG')" class="flex flex-col items-center justify-center p-4 rounded-2xl bg-sky-500/20 border border-sky-400/50 hover:bg-sky-500/30 transition cursor-pointer">
+              <span class="text-3xl mb-1.5">🛫</span>
+              <span class="font-black text-sm text-sky-300">HKG</span>
+              <span class="text-[11px] text-slate-400">閘口及行李帶查詢</span>
+            </button>
+            <button onclick="switchPhoneApp('DOC_CHECK')" class="flex flex-col items-center justify-center p-4 rounded-2xl bg-emerald-500/20 border border-emerald-400/50 hover:bg-emerald-500/30 transition cursor-pointer">
+              <span class="text-3xl mb-1.5">🛂</span>
+              <span class="font-black text-sm text-emerald-300">Doc Check</span>
+              <span class="text-[11px] text-slate-400">護照/Visa 相機</span>
+            </button>
+          </div>
+          <div class="mt-5 bg-slate-800/80 border border-slate-700 rounded-2xl p-3 text-xs text-slate-300 space-y-1">
+            <div class="font-bold text-sky-300">💡 操作貼士：</div>
+            <p>• <strong>Allxxxx</strong>：第一關預約輪椅必用，需核對 PIL 選擇航班、閘口、WCHR/S/C、細輪及轉機。</p>
+            <p>• <strong>Airline Ops</strong>：聯絡急需轉機航空公司，彈出 👌🏻 代表會等埋，👋🏻 需交入境同事。</p>
+            <p>• <strong>HKG</strong>：第二關點擊對應航班編號後，電話會自動收起並喺你頭頂彈出閘口/行李帶數字！</p>
+          </div>
+        `;
+      } else if (app === 'ALLXXXX') {
+        elPhoneAppTitle.textContent = 'Allxxxx 輪椅派單系統';
+        const flightOptions = [state.arrFlight.no, state.depFlight.no, ...state.transferFlights.map(t => t.no)]
+          .sort(() => Math.random() - 0.5);
+        const gateOptions = [state.gateNo, ...state.transferFlights.map(t => t.gate), 12, 35, 512, 205]
+          .filter((v, i, a) => a.indexOf(v) === i)
+          .sort(() => Math.random() - 0.5);
+
+        elPhoneBody.innerHTML = `
+          <div class="space-y-3 text-xs">
+            <div class="bg-amber-500/15 border border-amber-400/40 rounded-xl p-2.5 text-amber-200">
+              請根據 <strong>PIL 輪椅名單</strong> 逐一填寫並發送派單（目前進度：${state.s1Wheelchairs.filter(w => w.booked).length}/${state.s1Wheelchairs.length}）
+            </div>
+            <div>
+              <label class="block text-slate-400 font-bold mb-1">1. 航班編號 (Flight No.)</label>
+              <select id="axFlight" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                ${flightOptions.map(f => `<option value="${f}">${f}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 font-bold mb-1">2. 閘口號碼 (Gate No.)</label>
+              <select id="axGate" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                ${gateOptions.map(g => `<option value="${g}">GATE ${g}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 font-bold mb-1">3. 輪椅服務類別 (SSR Code)</label>
+              <select id="axCode" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                <option value="WCHR">WCHR (可自行上落機艙梯及步行)</option>
+                <option value="WCHS">WCHS (不可上落樓梯，可自行步入機艙)</option>
+                <option value="WCHC">WCHC (完全無法步行，需抬送至座位)</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-slate-400 font-bold mb-1">4. 要唔要細輪？</label>
+                <select id="axNarrow" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                  <option value="false">否 (普通輪椅)</option>
+                  <option value="true">是 (需要細輪)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-slate-400 font-bold mb-1">5. 有冇轉機？</label>
+                <select id="axTransfer" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                  <option value="false">否 (本地入境)</option>
+                  <option value="true">是 (有轉機航班)</option>
+                </select>
+              </div>
+            </div>
+            <button onclick="submitAllxxxxOrder()" class="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm shadow-lg cursor-pointer">
+              📤 發送輪椅派單
+            </button>
+            <div class="space-y-1 pt-1">
+              <div class="text-[11px] font-bold text-slate-400">PIL 輪椅預約狀態：</div>
+              ${state.s1Wheelchairs.map(w => `
+                <div class="flex justify-between items-center bg-slate-800/70 px-2.5 py-1.5 rounded-lg border border-slate-700">
+                  <span>${w.name} (${w.code})</span>
+                  <span class="${w.booked ? 'text-emerald-400 font-bold' : 'text-amber-400'}">${w.booked ? '✅ 已預約' : '待派單'}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } else if (app === 'AIRLINE_OPS') {
+        elPhoneAppTitle.textContent = 'Airline Ops 航空公司熱線';
+        const tf = state.s1UrgentTransfer;
+        const allFlights = [...state.transferFlights, { no: state.arrFlight.no, dest: 'HKG' }]
+          .sort(() => Math.random() - 0.5);
+        elPhoneBody.innerHTML = `
+          <div class="space-y-3 text-xs">
+            <div class="bg-sky-500/15 border border-sky-400/40 rounded-xl p-2.5 text-sky-200">
+              聯絡急需轉機乘客的<strong>對方航空公司</strong>，確認會否等待轉機乘客。
+            </div>
+            <div>
+              <label class="block text-slate-400 font-bold mb-1">選擇接駁航班編號</label>
+              <select id="opsFlight" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                ${allFlights.map(f => `<option value="${f.no}">${f.no} (${f.dest})</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label class="block text-slate-400 font-bold mb-1">急需轉機人數</label>
+              <select id="opsCount" class="w-full bg-slate-800 border border-slate-600 rounded-xl p-2 text-white font-bold">
+                ${[1, 2, 3, 4, 5, 6].map(n => `<option value="${n}">${n} 位乘客</option>`).join('')}
+              </select>
+            </div>
+            <button onclick="submitAirlineOpsCall()" class="w-full py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm shadow-lg cursor-pointer">
+              📞 確定聯絡對方航空公司
+            </button>
+            ${tf && tf.contacted ? `
+              <div class="mt-3 p-3.5 rounded-2xl border text-center space-y-1 ${tf.decision === 'WAIT' ? 'bg-emerald-950/80 border-emerald-500' : 'bg-rose-950/80 border-rose-500'}">
+                <div class="text-4xl">${tf.decision === 'WAIT' ? '👌🏻' : '👋🏻'}</div>
+                <div class="font-black text-sm text-white">
+                  ${tf.decision === 'WAIT' ? '對方回覆：會等埋！（Gate Hold Confirmed）' : '對方回覆：唔會等！（Offloaded / Misconnected）'}
+                </div>
+                <p class="text-[11px] text-slate-300">
+                  ${tf.decision === 'WAIT' ? '請指示轉機乘客落機後直奔轉機閘口。' : '請立即收起電話，點擊場景中的「入境/改簽同事」帶乘客辦理入境及改簽！'}
+                </p>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      } else if (app === 'HKG') {
+        elPhoneAppTitle.textContent = 'HKG 機場航班資訊';
+        // Mix arrival flight, transfer flights, and extra decoy flights without pre-revealing answers
+        const decoyArr = FLIGHT_TEMPLATES.find(f => f.no !== state.arrFlight.no && f.no !== state.depFlight.no) || FLIGHT_TEMPLATES[2];
+        const decoyDep = CONNECTING_TEMPLATES.find(c => !state.transferFlights.some(tf => tf.no === c.no)) || CONNECTING_TEMPLATES[4];
+
+        const mixedFlights = [
+          { kind: 'BELT', no: state.arrFlight.no, route: `來自 ${state.arrFlight.origin}`, val: state.arrFlight.belt },
+          { kind: 'BELT', no: decoyArr.no, route: `來自 ${decoyArr.origin}`, val: ((state.arrFlight.belt + 4) % 16) + 1 },
+          ...state.transferFlights.map(tf => ({
+            kind: 'GATE',
+            no: tf.no,
+            route: `前往 ${tf.dest}`,
+            val: tf.gate
+          })),
+          { kind: 'GATE', no: decoyDep.no, route: `前往 ${decoyDep.dest}`, val: HKG_GATES[(state.gateNo + 7) % HKG_GATES.length] }
+        ].sort((a, b) => a.no.localeCompare(b.no));
+
+        elPhoneBody.innerHTML = `
+          <div class="space-y-3 text-xs">
+            <div class="bg-sky-500/15 border border-sky-400/40 rounded-xl p-2 text-sky-200">
+              請自行找出並點擊乘客詢問的<strong>航班編號</strong>，電話會自動收起並喺你頭頂彈出閘口或行李帶號碼！
+            </div>
+            <div class="space-y-2">
+              <div class="font-extrabold text-slate-300">✈️ 今日所有到港及離港航班列表</div>
+              ${mixedFlights.map(item => `
+                <button onclick="selectHkgFlightInfo('${item.kind}', '${item.no}', '${item.val}')" class="w-full flex items-center justify-between p-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 transition cursor-pointer">
+                  <div class="text-left">
+                    <div class="font-black text-sm text-white">${item.no}</div>
+                    <div class="text-[11px] text-slate-400">${item.route}</div>
+                  </div>
+                  <span class="px-2.5 py-1 rounded-lg bg-slate-700 border border-slate-500 text-sky-300 font-bold">查詢詳情 ›</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      } else if (app === 'DOC_CHECK') {
+        elPhoneAppTitle.textContent = '🛂 HKG Doc Check 相機';
+        const pax = state.s3DocPax.find(p => p.id === state.currentDocPaxId) || state.s3DocPax.find(p => !p.resolved);
+        if (!pax) {
+          elPhoneBody.innerHTML = `<div class="text-center text-slate-400 py-10 text-xs">目前沒有等待查核證件的乘客。請先在第三關帶頭頂有「🛂」的乘客前往登機櫃枱。</div>`;
+          return;
+        }
+        state.currentDocPaxId = pax.id;
+        const isPassport = state.docViewTab === 'PASSPORT';
+
+        elPhoneBody.innerHTML = `
+          <div class="space-y-2.5 text-xs">
+            <!-- Camera Viewfinder Frame -->
+            <div class="relative rounded-2xl overflow-hidden border-2 border-emerald-400/80 bg-slate-950 p-3 shadow-inner">
+              <div class="scanner-laser absolute left-0 right-0 h-0.5 bg-emerald-400/80 shadow-[0_0_8px_#34d399] pointer-events-none"></div>
+              <div class="flex items-center justify-between text-[10px] text-emerald-400 font-mono mb-2">
+                <span>● CAM LIVE [OCR SCANNING]</span>
+                <span>${isPassport ? 'PAGE 1: PASSPORT' : 'PAGE 2: VISA PERMIT'}</span>
+              </div>
+
+              ${isPassport ? `
+                <div class="bg-indigo-950/90 border border-indigo-400/50 rounded-xl p-3 space-y-2">
+                  <div class="flex items-center justify-between border-b border-indigo-700/60 pb-1">
+                    <span class="font-black text-indigo-300 tracking-wider">PASSPORT 護照個人資料頁</span>
+                    <span class="text-[10px] bg-indigo-800 px-1.5 py-0.5 rounded">HKSAR / INTL</span>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <div class="w-14 h-16 rounded-lg bg-slate-800 border border-slate-500 flex items-center justify-center text-3xl">
+                      ${pax.face}
+                    </div>
+                    <div class="space-y-1 flex-1">
+                      <div><span class="text-slate-400 text-[10px] block">姓名 SURNAME, GIVEN NAME</span><strong class="text-white text-xs">${pax.name}</strong></div>
+                      <div class="flex gap-4">
+                        <div><span class="text-slate-400 text-[10px] block">性別 SEX</span><strong class="text-amber-300">${pax.gender}</strong></div>
+                        <div><span class="text-slate-400 text-[10px] block">護照號碼 PASSPORT NO.</span><strong class="text-sky-300 font-mono">${pax.passportNo}</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ` : `
+                <div class="bg-emerald-950/90 border border-emerald-400/50 rounded-xl p-3 space-y-2">
+                  <div class="flex items-center justify-between border-b border-emerald-700/60 pb-1">
+                    <span class="font-black text-emerald-300 tracking-wider">ENTRY VISA 目的地簽證頁</span>
+                    <span class="text-[10px] bg-emerald-800 px-1.5 py-0.5 rounded">DEST: ${state.depFlight.dest.split(' ')[0]}</span>
+                  </div>
+                  <div class="space-y-1.5">
+                    <div><span class="text-slate-400 text-[10px] block">簽證持有人姓名 HOLDER NAME</span><strong class="text-white text-xs">${pax.visaName}</strong></div>
+                    <div class="flex justify-between">
+                      <div><span class="text-slate-400 text-[10px] block">性別 SEX</span><strong class="text-amber-300">${pax.visaGender}</strong></div>
+                      <div><span class="text-slate-400 text-[10px] block">關聯護照號碼 PASSPORT NO.</span><strong class="text-sky-300 font-mono">${pax.visaPassportNo}</strong></div>
+                    </div>
+                    <div><span class="text-slate-400 text-[10px] block">簽證狀態 STATUS</span><strong class="text-emerald-300">${pax.visaValid}</strong></div>
+                  </div>
+                </div>
+              `}
+            </div>
+
+            <!-- Switch Passport / Visa Tab Button -->
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="setDocTab('PASSPORT')" class="py-2 rounded-xl font-bold border cursor-pointer ${isPassport ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+                📕 檢視護照 (Passport)
+              </button>
+              <button onclick="setDocTab('VISA')" class="py-2 rounded-xl font-bold border cursor-pointer ${!isPassport ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+                📑 翻去簽證 (Visa)
+              </button>
+            </div>
+
+            <div class="text-[11px] text-slate-300 bg-slate-800/80 p-2 rounded-xl border border-slate-700">
+              請仔細核對 <strong>頭像、姓名、性別、護照號碼</strong> 是否完全吻合！
+            </div>
+
+            <!-- Approve ✅ or Reject ❌ -->
+            <div class="grid grid-cols-2 gap-2.5 pt-1">
+              <button onclick="submitDocDecision(true)" class="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm shadow-lg cursor-pointer">
+                ✅ 資料吻合（放行）
+              </button>
+              <button onclick="submitDocDecision(false)" class="py-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm shadow-lg cursor-pointer">
+                ❌ 不吻合（交同事入境）
+              </button>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    window.switchPhoneApp = function (app) {
+      state.activePhoneApp = app;
+      renderPhoneApp();
+    };
+
+    window.setDocTab = function (tab) {
+      SoundFX.shutter();
+      state.docViewTab = tab;
+      renderPhoneApp();
+    };
+
+    window.submitAllxxxxOrder = function () {
+      const flight = document.getElementById('axFlight').value;
+      const gate = parseInt(document.getElementById('axGate').value, 10);
+      const code = document.getElementById('axCode').value;
+      const narrow = document.getElementById('axNarrow').value === 'true';
+      const transfer = document.getElementById('axTransfer').value === 'true';
+
+      const targetFlight = state.stage <= 2 ? state.arrFlight.no : state.depFlight.no;
+      if (flight !== targetFlight || gate !== state.gateNo) {
+        addScore(-5, 'Allxxxx 派單的航班編號或閘口號碼填錯，請核對 PIL！');
+        return;
+      }
+
+      const match = state.s1Wheelchairs.find(w =>
+        !w.booked && w.code === code && w.narrowAisle === narrow && w.transfer === transfer
+      );
+
+      if (match) {
+        match.booked = true;
+        addScore(10, `成功為 ${match.name} (${match.code}) 預約輪椅！`);
+        renderPhoneApp();
+        checkStage1Completion();
+      } else {
+        addScore(-5, '輪椅類別 (WCHR/S/C)、細輪或轉機選項與 PIL 不符，或已重複預約！');
+      }
+    };
+
+    window.submitAirlineOpsCall = function () {
+      const tf = state.s1UrgentTransfer;
+      if (!tf) return;
+      const fNo = document.getElementById('opsFlight').value;
+      const cnt = parseInt(document.getElementById('opsCount').value, 10);
+
+      if (fNo !== tf.flightNo || cnt !== tf.count) {
+        addScore(-5, '轉機航班編號或轉機人數與 PIL 不符，請先查閱 PIL！');
+        return;
+      }
+
+      if (!tf.contacted) {
+        tf.contacted = true;
+        // 50% 👌🏻 (Wait) / 50% 👋🏻 (No Wait)
+        tf.decision = Math.random() < 0.5 ? 'WAIT' : 'NO_WAIT';
+        if (tf.decision === 'WAIT') {
+          addScore(10, `對方航空公司回覆 👌🏻（會等埋 ${tf.count} 位轉機客）！`);
+        } else {
+          SoundFX.alert();
+          showToast('👋🏻 對方航空公司回覆唔會等！請即刻點擊場景中的「入境同事」交接！', 'warn');
+        }
+      }
+      renderPhoneApp();
+      checkStage1Completion();
+    };
+
+    window.selectHkgFlightInfo = function (kind, flightNo, value) {
+      closePhone();
+      const label = kind === 'GATE' ? `GATE ${value}` : `BELT ${value}`;
+      state.player.headBubble = {
+        text: `${flightNo} ➔ ${label}`,
+        kind,
+        flightNo,
+        value,
+        timer: 10
+      };
+      SoundFX.success();
+      showToast(`📱 已查詢 ${flightNo}：${label}（顯示於頭頂）`, 'info');
+
+      // Check if any revealed Stage 2 special passenger is waiting for this exact Gate or Belt!
+      if (state.stage === 2) {
+        const waitingPax = state.specialPax.find(p =>
+          !p.leaving && p.revealed && (
+            (kind === 'GATE' && p.type === 'TRANSFER_GATE' && p.flightNo === flightNo) ||
+            (kind === 'BELT' && p.type === 'BAG_BELT' && p.flightNo === flightNo)
+          )
+        );
+        if (waitingPax) {
+          resolveSpecialArrivalPax(
+            waitingPax,
+            kind === 'GATE'
+              ? `已指示轉機乘客前往 ${flightNo} 登機閘口 ${value}！`
+              : `已通知乘客前往 ${value} 號行李轉盤！`
+          );
+        }
+      }
+    };
+
+    window.submitDocDecision = function (approved) {
+      const pax = state.s3DocPax.find(p => p.id === state.currentDocPaxId);
+      if (!pax || pax.resolved) return;
+
+      closePhone();
+      elBtnDocCheckTrigger.classList.add('hidden');
+      pax.resolved = true;
+      pax.following = false;
+
+      if (approved === pax.isMatch) {
+        addScore(10, approved
+          ? `證件吻合，已為 ${pax.name} 完成 Doc Check 放行登機！`
+          : `成功攔截（${pax.mismatchReason}）的 ${pax.name}，已交由同事帶往辦理入境！`
+        );
+      } else {
+        addScore(-15, approved
+          ? `錯誤放行！${pax.name} 的${pax.mismatchReason}！`
+          : `誤判！${pax.name} 的證件資料完全吻合，引起旅客投訴！`
+        );
+      }
+      checkStage3PrepCompletion();
+    };
+
+    // --- Interaction Dialogs (Wheelchair Verification / Immigration Colleague) ---
+    function openWheelchairDialog(pax, isDeparture) {
+      elInterIcon.textContent = '♿️';
+      elInterTitle.textContent = isDeparture ? '離港輪椅乘客核對' : '到港輪椅乘客核對';
+      elInterSubtitle.textContent = '請核對乘客姓名是否在 PIL 輪椅名單內';
+      elInterBody.innerHTML = `
+        <div><strong>乘客自報姓名：</strong><span class="text-amber-300 font-mono">${pax.name}</span></div>
+        <div><strong>輪椅類別：</strong><span class="text-sky-300 font-bold">${pax.code}</span></div>
+        <p class="text-xs text-slate-400 pt-1">提示：請打開右上角「📋 PIL」核對名單是否確有此人。</p>
+      `;
+
+      elInterButtons.innerHTML = '';
+
+      const btnValid = document.createElement('button');
+      btnValid.className = 'flex-1 py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs sm:text-sm cursor-pointer';
+      btnValid.textContent = '✅ 啱名！交畀輪椅姐姐/叔叔';
+      btnValid.onclick = () => {
+        elInterModal.classList.add('hidden');
+        if (pax.valid) {
+          if (isDeparture) {
+            pax.resolved = true;
+            addScore(10, `已核對 ${pax.name} 並交由輪椅同事優先登機！`);
+            checkStage3PrepCompletion();
+          } else {
+            resolveSpecialArrivalPax(pax, `已核對 ${pax.name} 並交由輪椅姐姐/叔叔接走！`);
+          }
+        } else {
+          if (isDeparture) {
+            pax.resolved = true;
+            addScore(-10, `${pax.name} 並無預約輪椅服務，錯交輪椅同事被投訴！`);
+            checkStage3PrepCompletion();
+          } else {
+            resolveSpecialArrivalPax(pax, '');
+            addScore(-10, `${pax.name} 不在 PIL 輪椅名單內，錯派輪椅被投訴！`);
+          }
+        }
+      };
+
+      const btnReject = document.createElement('button');
+      btnReject.className = 'flex-1 py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs sm:text-sm cursor-pointer';
+      btnReject.textContent = isDeparture ? '🪑 唔啱名，捉佢坐返低先' : '🚫 唔啱名，叫佢自行離開';
+      btnReject.onclick = () => {
+        elInterModal.classList.add('hidden');
+        if (!pax.valid) {
+          if (isDeparture) {
+            pax.resolved = true;
+            addScore(10, `成功識別未預約輪椅的 ${pax.name}，已請佢坐返低等候！`);
+            checkStage3PrepCompletion();
+          } else {
+            resolveSpecialArrivalPax(pax, `已核對名單無誤，禮貌請 ${pax.name} 自行離開！`);
+          }
+        } else {
+          if (isDeparture) {
+            pax.resolved = true;
+            addScore(-10, `${pax.name} 係 PIL 預約輪椅乘客，唔應該捉佢坐返低！`);
+            checkStage3PrepCompletion();
+          } else {
+            resolveSpecialArrivalPax(pax, '');
+            addScore(-10, `${pax.name} 係 PIL 預約輪椅乘客，拒絕服務收到投訴！`);
+          }
+        }
+      };
+
+      const btnCancel = document.createElement('button');
+      btnCancel.className = 'py-2.5 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold text-xs cursor-pointer';
+      btnCancel.textContent = '先睇 PIL';
+      btnCancel.onclick = () => {
+        elInterModal.classList.add('hidden');
+        openPilModal();
+      };
+
+      elInterButtons.appendChild(btnValid);
+      elInterButtons.appendChild(btnReject);
+      elInterButtons.appendChild(btnCancel);
+      elInterModal.classList.remove('hidden');
+    }
+
+    function openImmigrationHandoverDialog() {
+      const tf = state.s1UrgentTransfer;
+      elInterIcon.textContent = '👮🏻‍♂️';
+      elInterTitle.textContent = '入境及改簽支援同事';
+      elInterSubtitle.textContent = '交接未能趕上轉機（對方回覆 👋🏻 唔等）的乘客';
+
+      if (!tf || !tf.contacted) {
+        elInterBody.innerHTML = `<p>目前未有確認「👋🏻 唔會等」的轉機乘客需要帶往入境。請先用公司電話 <strong>Airline Ops</strong> 聯絡對方航空公司。</p>`;
+        elInterButtons.innerHTML = `<button onclick="document.getElementById('interactionModal').classList.add('hidden')" class="w-full py-2.5 rounded-xl bg-slate-700 text-white font-bold text-xs cursor-pointer">明白</button>`;
+      } else if (tf.decision === 'WAIT') {
+        elInterBody.innerHTML = `<p>對方航空公司回覆 <strong>👌🏻 會等埋</strong>（${tf.flightNo}，${tf.count} 人），乘客可直接轉機，無需交畀入境同事！</p>`;
+        elInterButtons.innerHTML = `<button onclick="document.getElementById('interactionModal').classList.add('hidden')" class="w-full py-2.5 rounded-xl bg-slate-700 text-white font-bold text-xs cursor-pointer">關閉</button>`;
+      } else if (tf.handedOver) {
+        elInterBody.innerHTML = `<p class="text-emerald-300 font-bold">✅ 已成功將 ${tf.count} 位轉機乘客交由同事帶往辦理入境及改簽手續！</p>`;
+        elInterButtons.innerHTML = `<button onclick="document.getElementById('interactionModal').classList.add('hidden')" class="w-full py-2.5 rounded-xl bg-slate-700 text-white font-bold text-xs cursor-pointer">關閉</button>`;
+      } else {
+        elInterBody.innerHTML = `
+          <p>接駁航班 <strong class="text-amber-300">${tf.flightNo}</strong> 回覆 <strong class="text-rose-400">👋🏻 唔會等</strong>！</p>
+          <p>確認將 <strong class="text-white">${tf.count} 位轉機乘客</strong> 交畀同事帶佢哋辦理香港入境及改簽下一班機？</p>
+        `;
+        elInterButtons.innerHTML = `
+          <button id="btnConfirmHandover" class="flex-1 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs sm:text-sm cursor-pointer">✅ 確認交接帶佢入境</button>
+          <button onclick="document.getElementById('interactionModal').classList.add('hidden')" class="py-2.5 px-4 rounded-xl bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer">取消</button>
+        `;
+        setTimeout(() => {
+          const btn = document.getElementById('btnConfirmHandover');
+          if (btn) {
+            btn.onclick = () => {
+              tf.handedOver = true;
+              elInterModal.classList.add('hidden');
+              addScore(10, `已將 ${tf.count} 位未能轉機乘客交由同事帶往入境！`);
+              checkStage1Completion();
+            };
+          }
+        }, 0);
+      }
+      elInterModal.classList.remove('hidden');
+    }
+
+    // --- Input Handling (Keyboard + Click/Touch on Canvas) ---
+    window.addEventListener('keydown', e => {
+      state.keys[e.key.toLowerCase()] = true;
+      state.player.targetX = null;
+      state.player.targetY = null;
+    });
+    window.addEventListener('keyup', e => {
+      state.keys[e.key.toLowerCase()] = false;
+    });
+
+    canvas.addEventListener('pointerdown', e => {
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const clickY = e.clientY - rect.top;
+
+      if (handleCanvasObjectClick(clickX, clickY)) {
+        return;
+      }
+
+      state.player.targetX = clickX;
+      state.player.targetY = Math.max(95, Math.min(canvas.height - 28, clickY));
+    });
+
+    function handleCanvasObjectClick(cx, cy) {
+      // Stage 1: Click Immigration Colleague or Medical Station
+      if (state.stage === 1) {
+        const immX = canvas.width * 0.25;
+        const immY = canvas.height * 0.36;
+        if (Math.hypot(cx - immX, cy - immY) < 85) {
+          openImmigrationHandoverDialog();
+          return true;
+        }
+        const medX = canvas.width * 0.75;
+        const medY = canvas.height * 0.36;
+        if (Math.hypot(cx - medX, cy - medY) < 85) {
+          if (state.s1AmbulanceNeeded && !state.s1AmbulanceCalled) {
+            callAmbulanceFromPil();
+          } else {
+            showToast(state.s1AmbulanceNeeded ? '🚑 白車已在閘口戒備中。' : '🏥 本班機暫無緊急醫療求助。', 'info');
+          }
+          return true;
+        }
+      }
+
+      // Stage 2: Click Revealed Special Needs Passenger
+      if (state.stage === 2) {
+        for (const sp of state.specialPax) {
+          if (sp.leaving) continue;
+          if (Math.hypot(cx - sp.x, cy - sp.y) < 42) {
+            if (!sp.revealed) {
+              state.player.targetX = sp.x;
+              state.player.targetY = sp.y;
+              showToast('🏃🏻 行近啲先睇到呢位乘客需要咩協助！', 'info');
+              return true;
+            }
+            triggerStage2PaxAction(sp);
+            return true;
+          }
+        }
+      }
+
+      // Stage 3: Click Wheelchair or Doc Check Passenger
+      if (state.stage === 3) {
+        if (state.s3Phase === 'PREP_DOC_WC') {
+          for (const wc of state.s3Wheelchairs) {
+            if (!wc.resolved && Math.hypot(cx - wc.x, cy - wc.y) < 42) {
+              if (Math.hypot(state.player.x - wc.x, state.player.y - wc.y) > 95) {
+                state.player.targetX = wc.x;
+                state.player.targetY = wc.y;
+                return true;
+              }
+              openWheelchairDialog(wc, true);
+              return true;
+            }
+          }
+          for (const dp of state.s3DocPax) {
+            if (!dp.resolved && Math.hypot(cx - dp.x, cy - dp.y) < 42) {
+              if (Math.hypot(state.player.x - dp.x, state.player.y - dp.y) > 95) {
+                state.player.targetX = dp.x;
+                state.player.targetY = dp.y;
+                return true;
+              }
+              dp.following = true;
+              showToast(`🛂 已帶同 ${dp.name}，請行去上方登機櫃枱按「🛂 doc check」！`, 'info');
+              return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    // --- Trigger Stage 2 Special Passenger Interaction ---
+    function triggerStage2PaxAction(pax) {
+      if (pax.type === 'WC') {
+        openWheelchairDialog(pax, false);
+      } else if (pax.type === 'TRANSFER_GATE') {
+        showToast(`🚪 轉機乘客：請問 ${pax.flightNo}（前往 ${pax.dest}）喺邊個閘口？請打開電話「HKG」App 查詢！`, 'info');
+      } else if (pax.type === 'BAG_BELT') {
+        showToast(`🛄 抵港乘客：請問 ${pax.flightNo} 嘅行李喺幾號行李帶？請打開電話「HKG」App 查詢！`, 'info');
+      } else if (pax.type === 'TOILET') {
+        pax.following = true;
+        showToast('🚾 乘客跟緊你！請帶佢行入畫面右下角嘅「🚻」方格內！', 'info');
+      }
+    }
+
+    // --- Main Simulation Update Loop ---
+    function update(dt) {
+      // Update Phone Clock
+      const now = new Date();
+      const phoneClock = document.getElementById('phoneTimeStr');
+      if (phoneClock) {
+        phoneClock.textContent = now.toTimeString().slice(0, 5);
+      }
+
+      // Player Movement (Keyboard & Click/Tap Target)
+      const p = state.player;
+      let moveX = 0;
+      let moveY = 0;
+      if (state.keys['w'] || state.keys['arrowup']) moveY -= 1;
+      if (state.keys['s'] || state.keys['arrowdown']) moveY += 1;
+      if (state.keys['a'] || state.keys['arrowleft']) moveX -= 1;
+      if (state.keys['d'] || state.keys['arrowright']) moveX += 1;
+
+      if (moveX !== 0 || moveY !== 0) {
+        const len = Math.hypot(moveX, moveY);
+        p.x += (moveX / len) * p.speed * dt;
+        p.y += (moveY / len) * p.speed * dt;
+      } else if (p.targetX !== null && p.targetY !== null) {
+        const dx = p.targetX - p.x;
+        const dy = p.targetY - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 6) {
+          p.x += (dx / dist) * p.speed * dt;
+          p.y += (dy / dist) * p.speed * dt;
+        } else {
+          p.targetX = null;
+          p.targetY = null;
+        }
+      }
+
+      // Clamp player within terminal floor bounds
+      p.x = Math.max(24, Math.min(canvas.width - 24, p.x));
+      p.y = Math.max(85, Math.min(canvas.height - 24, p.y));
+
+      // Update Overhead Bubble Timer (Gate / Belt Number)
+      if (p.headBubble) {
+        p.headBubble.timer -= dt;
+        if (p.headBubble.timer <= 0) {
+          p.headBubble = null;
+        }
+      }
+
+      // --- STAGE 2 LOGIC: Arrival Disembarkation & Special Needs ---
+      if (state.stage === 2) {
+        // Spawn normal disembarking passengers continuously
+        state.stage2NormalSpawnTimer -= dt;
+        if (state.stage2NormalSpawnTimer <= 0) {
+          spawnNormalArrivalPax();
+          state.stage2NormalSpawnTimer = 0.65 + Math.random() * 0.55;
+        }
+
+        // Spawn special needs passengers periodically
+        if (state.stage2SpecialQueue.length > 0 && state.specialPax.filter(sp => !sp.leaving).length < 4) {
+          state.stage2SpawnTimer -= dt;
+          if (state.stage2SpawnTimer <= 0) {
+            spawnNextSpecialArrivalPax();
+            state.stage2SpawnTimer = 3.2 + Math.random() * 2.2;
+          }
+        }
+
+        // Update normal passengers walking down & disappearing at bottom
+        for (let i = state.normalPax.length - 1; i >= 0; i--) {
+          const np = state.normalPax[i];
+          np.wobble += dt * 4;
+          np.x += Math.sin(np.wobble) * 14 * dt + np.vx * 0.2 * dt;
+          np.y += np.vy * dt;
+          if (np.y > canvas.height + 30) {
+            state.normalPax.splice(i, 1);
+          }
+        }
+
+        // Update special needs passengers
+        for (let i = state.specialPax.length - 1; i >= 0; i--) {
+          const sp = state.specialPax[i];
+
+          if (sp.leaving) {
+            sp.y += 125 * dt;
+            if (sp.y > canvas.height + 35) {
+              state.specialPax.splice(i, 1);
+            }
+            continue;
+          }
+
+          // Proximity reveal ('❓' -> specific emoji)
+          const distToPlayer = Math.hypot(p.x - sp.x, p.y - sp.y);
+          if (!sp.revealed && distToPlayer < 68) {
+            sp.revealed = true;
+            SoundFX.chime();
+            if (sp.type === 'TOILET') {
+              sp.following = true;
+              showToast('🚾 乘客想搵廁所！請帶佢行入右下角「🚻」logo 內！', 'info');
+            } else if (sp.type === 'TRANSFER_GATE') {
+              showToast(`🚪 乘客詢問轉機航班 ${sp.flightNo} 閘口！請開手機「HKG」App 查詢。`, 'info');
+            } else if (sp.type === 'BAG_BELT') {
+              showToast(`🛄 乘客詢問 ${sp.flightNo} 行李帶！請開手機「HKG」App 查詢。`, 'info');
+            } else if (sp.type === 'WC') {
+              showToast(`♿️ 輪椅乘客 (${sp.name})，請點擊佢核對姓名！`, 'info');
+            }
+          }
+
+          // Auto-answer if player already has matching Gate/Belt bubble overhead
+          if (sp.revealed && p.headBubble) {
+            if (
+              (p.headBubble.kind === 'GATE' && sp.type === 'TRANSFER_GATE' && p.headBubble.flightNo === sp.flightNo) ||
+              (p.headBubble.kind === 'BELT' && sp.type === 'BAG_BELT' && p.headBubble.flightNo === sp.flightNo)
+            ) {
+              resolveSpecialArrivalPax(
+                sp,
+                p.headBubble.kind === 'GATE'
+                  ? `已指示轉機乘客前往 ${sp.flightNo} 登機閘口 ${p.headBubble.value}！`
+                  : `已通知乘客前往 ${p.headBubble.value} 號行李轉盤！`
+              );
+              continue;
+            }
+          }
+
+          // Toilet escort movement & drop-off check
+          if (sp.type === 'TOILET' && sp.following) {
+            const fdx = p.x - sp.x;
+            const fdy = p.y - sp.y;
+            const fdist = Math.hypot(fdx, fdy);
+            if (fdist > 32) {
+              sp.x += (fdx / fdist) * 230 * dt;
+              sp.y += (fdy / fdist) * 230 * dt;
+            }
+
+            const tz = state.toiletZone;
+            const tzCenterX = tz.x + tz.w / 2;
+            const tzCenterY = tz.y + tz.h / 2;
+            if (Math.hypot(sp.x - tzCenterX, sp.y - tzCenterY) < 42 || Math.hypot(p.x - tzCenterX, p.y - tzCenterY) < 42) {
+              resolveSpecialArrivalPax(sp, '已成功帶乘客前往洗手間 🚻！');
+              continue;
+            }
+          } else {
+            // Wander around arrival gate hall
+            const tdx = sp.targetX - sp.x;
+            const tdy = sp.targetY - sp.y;
+            const tdist = Math.hypot(tdx, tdy);
+            if (tdist > 8) {
+              sp.x += (tdx / tdist) * 58 * dt;
+              sp.y += (tdy / tdist) * 58 * dt;
+            } else {
+              sp.wanderTimer -= dt;
+              if (sp.wanderTimer <= 0) {
+                sp.targetX = canvas.width * (0.18 + Math.random() * 0.64);
+                sp.targetY = canvas.height * (0.30 + Math.random() * 0.48);
+                sp.wanderTimer = 2.5 + Math.random() * 2.5;
+              }
+            }
+          }
+        }
+      }
+
+      // --- STAGE 3 LOGIC ---
+      if (state.stage === 3) {
+        // Phase 1: Doc Check & Wheelchairs
+        if (state.s3Phase === 'PREP_DOC_WC') {
+          // Pick up doc check pax on proximity
+          let activeDocPax = state.s3DocPax.find(p => !p.resolved && p.following);
+          if (!activeDocPax) {
+            for (const dp of state.s3DocPax) {
+              if (!dp.resolved && Math.hypot(state.player.x - dp.x, state.player.y - dp.y) < 52) {
+                dp.following = true;
+                activeDocPax = dp;
+                showToast(`🛂 已帶同 ${dp.name}，請行去上方登機櫃枱按「🛂 doc check」！`, 'info');
+                break;
+              }
+            }
+          }
+
+          if (activeDocPax) {
+            const fdx = state.player.x - activeDocPax.x;
+            const fdy = state.player.y - activeDocPax.y;
+            const fdist = Math.hypot(fdx, fdy);
+            if (fdist > 34) {
+              activeDocPax.x += (fdx / fdist) * 235 * dt;
+              activeDocPax.y += (fdy / fdist) * 235 * dt;
+            }
+
+            // Generous proximity detection to Departure Counter for '🛂 doc check' button
+            const distPlayerCounter = Math.hypot(state.player.x - state.counterPos.x, state.player.y - state.counterPos.y);
+            const distPaxCounter = Math.hypot(activeDocPax.x - state.counterPos.x, activeDocPax.y - state.counterPos.y);
+            if (distPlayerCounter < 105 || distPaxCounter < 105) {
+              state.currentDocPaxId = activeDocPax.id;
+              elBtnDocCheckTrigger.classList.remove('hidden');
+            } else {
+              elBtnDocCheckTrigger.classList.add('hidden');
+            }
+          } else {
+            elBtnDocCheckTrigger.classList.add('hidden');
+          }
+        }
+
+        // Phase 2: Zone Queuing (STD -40m)
+        if (state.s3Phase === 'ZONE_QUEUE') {
+          // Advance Zone Display Timer: C (20s) -> B (20s) -> A
+          if (state.s3CurrentZone === 'C' || state.s3CurrentZone === 'B') {
+            state.s3ZoneTimer -= dt;
+            if (state.s3ZoneTimer <= 0) {
+              if (state.s3CurrentZone === 'C') {
+                state.s3CurrentZone = 'B';
+                state.s3ZoneTimer = 20;
+                SoundFX.chime();
+                showToast('📺 顯示屏已轉為「ZONE B」！請帶 Zone B 乘客到右邊排隊！', 'info');
+                // Trigger sudden Business Class passenger mid-way!
+                if (!state.s3BizTriggeredOnce) {
+                  triggerSuddenBusinessClass();
+                }
+              } else if (state.s3CurrentZone === 'B') {
+                state.s3CurrentZone = 'A';
+                state.s3ZoneTimer = 20;
+                SoundFX.chime();
+                showToast('📺 顯示屏已轉為「ZONE A」！請帶 Zone A 乘客到右邊排隊！', 'info');
+              }
+            }
+          }
+
+          // Business Class 7-second priority timer
+          if (state.s3BizAlertActive) {
+            state.s3BizTimer -= dt;
+            elBizCountdownText.textContent = `${Math.max(0, state.s3BizTimer).toFixed(1)}s`;
+            if (state.s3BizTimer <= 0) {
+              state.s3BizAlertActive = false;
+              elBizAlertBanner.classList.add('hidden');
+              addScore(-10, '超過 7 秒未帶 Business Class 貴賓入左邊專屬通道，收到 VIP 投訴！');
+            }
+          }
+
+          // Count currently following passengers (max 5 at a time)
+          const followingList = state.s3QueuePax.filter(p => p.state === 'FOLLOWING');
+
+          // Pick up matching passengers when player walks past them
+          if (followingList.length < 5) {
+            for (const p of state.s3QueuePax) {
+              if (p.state !== 'WAITING' || p.hiddenBiz) continue;
+              const isEligible = (p.zone === 'BIZ') || (p.zone === state.s3CurrentZone);
+              if (isEligible && Math.hypot(state.player.x - p.x, state.player.y - p.y) < 48) {
+                p.state = 'FOLLOWING';
+                followingList.push(p);
+                if (followingList.length >= 5) break;
+              }
+            }
+          }
+
+          // Move following chain behind player
+          followingList.forEach((p, idx) => {
+            const leader = idx === 0 ? state.player : followingList[idx - 1];
+            const fdx = leader.x - p.x;
+            const fdy = leader.y - p.y;
+            const fdist = Math.hypot(fdx, fdy);
+            if (fdist > 30) {
+              p.x += (fdx / fdist) * 240 * dt;
+              p.y += (fdy / fdist) * 240 * dt;
+            }
+          });
+
+          // Deposit into Left Queue (Business Class) or Right Queue (Economy Zone C/B/A)
+          for (let i = followingList.length - 1; i >= 0; i--) {
+            const p = followingList[i];
+            if (p.zone === 'BIZ' && Math.hypot(p.x - state.bizQueuePos.x, p.y - state.bizQueuePos.y) < 85) {
+              p.state = 'QUEUED';
+              if (p.id === state.s3BizPaxId && state.s3BizAlertActive) {
+                state.s3BizAlertActive = false;
+                elBizAlertBanner.classList.add('hidden');
+                addScore(10, '7 秒內迅速護送商務艙貴賓進入左邊專屬通道！');
+              } else {
+                addScore(3, 'Business Class 乘客已進入左邊商務艙通道！');
+              }
+            } else if (p.zone !== 'BIZ' && Math.hypot(p.x - state.econQueuePos.x, p.y - state.econQueuePos.y) < 85) {
+              p.state = 'QUEUED';
+              addScore(2, `Zone ${p.zone} 乘客已加入右邊登機隊伍！`);
+            }
+          }
+
+          // Arrange queued passengers neatly in Left & Right lanes
+          arrangeQueuedPassengers();
+
+          // Check if all non-straggler passengers are queued
+          const remainingToQueue = state.s3QueuePax.filter(p => p.state === 'WAITING' || p.state === 'FOLLOWING');
+          if (remainingToQueue.length === 0) {
+            startStage3Boarding();
+          }
+        }
+
+        // Phase 3: Formal Boarding (STD -30m): Strictly Business -> Zone C -> Zone B -> Zone A
+        if (state.s3Phase === 'BOARDING') {
+          const order = ['BIZ', 'C', 'B', 'A'];
+          let activeGroup = null;
+          for (const z of order) {
+            const hasActive = state.s3QueuePax.some(p => p.zone === z && (p.state === 'QUEUED' || p.state === 'BOARDING'));
+            if (hasActive) {
+              activeGroup = z;
+              break;
+            }
+          }
+
+          if (activeGroup) {
+            state.s3QueuePax.forEach(p => {
+              if (p.zone === activeGroup && p.state === 'QUEUED') {
+                p.state = 'BOARDING';
+              }
+              if (p.state === 'BOARDING') {
+                const bdx = state.boardingGateDoor.x - p.x;
+                const bdy = state.boardingGateDoor.y - p.y;
+                const bdist = Math.hypot(bdx, bdy);
+                if (bdist > 8) {
+                  p.x += (bdx / bdist) * 145 * dt;
+                  p.y += (bdy / bdist) * 145 * dt;
+                } else {
+                  p.state = 'BOARDED';
+                }
+              }
+            });
+          } else {
+            // All queued passengers have boarded -> Trigger STD -20m FINAL CALL!
+            startStage3FinalCall();
+          }
+        }
+
+        // Phase 4: Final Call (STD -20m)
+        if (state.s3Phase === 'FINAL_CALL') {
+          const followingList = state.s3QueuePax.filter(p => p.state === 'FOLLOWING');
+          if (followingList.length < 5) {
+            for (const p of state.s3QueuePax) {
+              if (p.state === 'WAITING' && Math.hypot(state.player.x - p.x, state.player.y - p.y) < 52) {
+                p.state = 'FOLLOWING';
+                followingList.push(p);
+                if (followingList.length >= 5) break;
+              }
+            }
+          }
+
+          followingList.forEach((p, idx) => {
+            const leader = idx === 0 ? state.player : followingList[idx - 1];
+            const fdx = leader.x - p.x;
+            const fdy = leader.y - p.y;
+            const fdist = Math.hypot(fdx, fdy);
+            if (fdist > 30) {
+              p.x += (fdx / fdist) * 245 * dt;
+              p.y += (fdy / fdist) * 245 * dt;
+            }
+
+            // Reaching either queue zone or gate door sends them boarding
+            const nearLeft = Math.hypot(p.x - state.bizQueuePos.x, p.y - state.bizQueuePos.y) < 90;
+            const nearRight = Math.hypot(p.x - state.econQueuePos.x, p.y - state.econQueuePos.y) < 90;
+            const nearDoor = Math.hypot(p.x - state.boardingGateDoor.x, p.y - state.boardingGateDoor.y) < 90;
+            if (nearLeft || nearRight || nearDoor) {
+              p.state = 'BOARDING';
+              addScore(5, 'Final Call 最後召集乘客已趕及登機！');
+            }
+          });
+
+          // Move BOARDING passengers up into aerobridge
+          state.s3QueuePax.forEach(p => {
+            if (p.state === 'BOARDING') {
+              const bdx = state.boardingGateDoor.x - p.x;
+              const bdy = state.boardingGateDoor.y - p.y;
+              const bdist = Math.hypot(bdx, bdy);
+              if (bdist > 8) {
+                p.x += (bdx / bdist) * 165 * dt;
+                p.y += (bdy / bdist) * 165 * dt;
+              } else {
+                p.state = 'BOARDED';
+              }
+            }
+          });
+
+          // Check if every single passenger has BOARDED!
+          const allBoarded = state.s3QueuePax.every(p => p.state === 'BOARDED');
+          if (allBoarded) {
+            finishEntireShift();
+          }
+        }
+      }
+    }
+
+    function arrangeQueuedPassengers() {
+      const bizQueued = state.s3QueuePax.filter(p => p.state === 'QUEUED' && p.zone === 'BIZ');
+      bizQueued.forEach((p, i) => {
+        p.x = state.bizQueuePos.x;
+        p.y = state.bizQueuePos.y + i * 28;
+      });
+
+      const econQueued = state.s3QueuePax.filter(p => p.state === 'QUEUED' && p.zone !== 'BIZ');
+      // Sort strictly C -> B -> A so they enter in exact order
+      const rank = { C: 1, B: 2, A: 3 };
+      econQueued.sort((a, b) => rank[a.zone] - rank[b.zone]);
+      econQueued.forEach((p, i) => {
+        p.x = state.econQueuePos.x;
+        p.y = state.econQueuePos.y + i * 26;
+      });
+    }
+
+    // --- Rendering Engine (2.5D HKG Terminal Aesthetic) ---
+    function draw() {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // 1. Terrazzo Airport Floor Tiles
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(0, 0, w, h);
+
+      const tileSize = 64;
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.08)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < w; x += tileSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+      for (let y = 0; y < h; y += tileSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      // Top Aerobridge Carpet Header
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 52, w, h * 0.14);
+      ctx.fillStyle = '#1d4ed8';
+      ctx.fillRect(w * 0.5 - 75, 52, 150, h * 0.14);
+
+      // Gate Overhead Signboard
+      ctx.fillStyle = '#f59e0b';
+      roundRect(ctx, w * 0.5 - 85, 62, 170, 34, 8);
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '900 15px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`GATE ${state.gateNo} 登機橋`, w * 0.5, 84);
+
+      if (state.stage === 1) drawStage1(w, h);
+      else if (state.stage === 2) drawStage2(w, h);
+      else if (state.stage === 3) drawStage3(w, h);
+
+      // Draw Player (HKG Ground Staff)
+      drawPlayer();
+    }
+
+    function drawStage1(w, h) {
+      // Responsive box width so text always fits cleanly inside even on mobile screens
+      const topBoxW = Math.min(205, Math.max(152, w * 0.43));
+      const bottomBoxW = Math.min(230, Math.max(185, w * 0.56));
+
+      // Immigration / Rebooking Colleague Station (Left) - Shift text left by ~1cm (-38px)
+      const immX = w * 0.25;
+      const immY = h * 0.36;
+      drawStationBox(immX, immY, topBoxW, 76, '#0284c7', '👮🏻‍♂️ 入境/改簽同事', '處理唔等轉機乘客', -38);
+
+      // Airport Medical / Ambulance Desk (Right)
+      const medX = w * 0.75;
+      const medY = h * 0.36;
+      drawStationBox(medX, medY, topBoxW, 76, state.s1AmbulanceNeeded ? '#e11d48' : '#475569', '🚑 機場醫療聯絡台', state.s1AmbulanceNeeded ? '⚠️ 需立即召白車！' : '醫療待命站');
+
+      // Wheelchair Standby Team (Bottom Center) - Shift text left by ~1cm (-38px)
+      drawStationBox(w * 0.5, h * 0.78, bottomBoxW, 70, '#d97706', '♿️ 輪椅服務待命區', `已預約 ${state.s1Wheelchairs.filter(x => x.booked).length}/${state.s1Wheelchairs.length}`, -38);
+    }
+
+    function drawStage2(w, h) {
+      // Exit arrows at bottom
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+      ctx.fillRect(w * 0.25, h - 38, w * 0.5, 38);
+      ctx.fillStyle = '#7dd3fc';
+      ctx.font = 'bold 13px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('⬇️ 抵港大堂 / 行李認領 / 轉機層出口 ⬇️', w * 0.5, h - 14);
+
+      // Bottom-right 1cm x 1cm (46px x 46px) 🚻 Toilet Logo Box
+      const tz = state.toiletZone;
+      ctx.fillStyle = '#0ea5e9';
+      roundRect(ctx, tz.x, tz.y, tz.w, tz.h, 8);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = '24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🚻', tz.x + tz.w / 2, tz.y + 32);
+
+      // Draw Normal Disembarking Passengers
+      state.normalPax.forEach(np => {
+        drawCharacter(np.x, np.y, np.face, null, '#94a3b8');
+      });
+
+      // Draw Special Needs Passengers
+      state.specialPax.forEach(sp => {
+        let badge = '❓';
+        let badgeBg = '#f59e0b';
+        if (sp.revealed) {
+          if (sp.type === 'WC') { badge = '♿️'; badgeBg = '#0284c7'; }
+          else if (sp.type === 'TRANSFER_GATE') { badge = `🚪 ${sp.flightNo}`; badgeBg = '#7c3aed'; }
+          else if (sp.type === 'TOILET') { badge = '🚾'; badgeBg = '#0ea5e9'; }
+          else if (sp.type === 'BAG_BELT') { badge = `🛄 ${sp.flightNo}`; badgeBg = '#d97706'; }
+        }
+        drawCharacter(sp.x, sp.y, sp.face, { text: badge, bg: badgeBg }, '#fbbf24');
+      });
+    }
+
+    function drawStage3(w, h) {
+      // Boarding Counter (Center Top)
+      drawStationBox(state.counterPos.x, state.counterPos.y, 165, 58, '#4f46e5', '🖥️ 登機閘口櫃枱', '🛂 證件查核處');
+
+      // Left Lane: Business Class Queue
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 6]);
+      roundRect(ctx, state.bizQueuePos.x - 45, state.bizQueuePos.y - 25, 90, 210, 14);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#fbbf24';
+      ctx.font = '900 12px "Noto Sans TC", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('👑 BUSINESS CLASS', state.bizQueuePos.x, state.bizQueuePos.y - 34);
+
+      // Right Lane: Economy Zone C / B / A Queue + Electronic Display Monitor
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 6]);
+      roundRect(ctx, state.econQueuePos.x - 45, state.econQueuePos.y - 25, 90, 210, 14);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Electronic Zone Display Monitor next to Right Lane
+      const monX = state.econQueuePos.x + 88;
+      const monY = state.econQueuePos.y - 10;
+      ctx.fillStyle = '#020617';
+      roundRect(ctx, monX - 46, monY - 26, 92, 52, 10);
+      ctx.fill();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('NOW BOARDING', monX, monY - 8);
+      ctx.fillStyle = '#34d399';
+      ctx.font = '900 16px sans-serif';
+      const zoneLabel = state.s3Phase === 'PREP_DOC_WC' ? 'WAIT' : `ZONE ${state.s3CurrentZone}`;
+      ctx.fillText(zoneLabel, monX, monY + 14);
+
+      // Draw Stage 3 Wheelchairs
+      state.s3Wheelchairs.forEach(wc => {
+        if (wc.resolved) return;
+        drawCharacter(wc.x, wc.y, wc.face, { text: '♿️ 核對', bg: '#0284c7' }, '#38bdf8');
+      });
+
+      // Draw Stage 3 Doc Check Passengers (🛂)
+      state.s3DocPax.forEach(dp => {
+        if (dp.resolved) return;
+        drawCharacter(dp.x, dp.y, dp.face, { text: '🛂', bg: '#e11d48' }, '#fb7185');
+      });
+
+      // Draw Boarding Passengers (Business, Zone C, Zone B, Zone A)
+      state.s3QueuePax.forEach(p => {
+        if (p.state === 'BOARDED' || p.state === 'STRAGGLER' || p.hiddenBiz) return;
+        const zoneColors = {
+          BIZ: '#f59e0b',
+          C: '#10b981',
+          B: '#0ea5e9',
+          A: '#a855f7'
+        };
+        const label = p.zone === 'BIZ' ? '👑 BIZ' : `ZONE ${p.zone}`;
+        drawCharacter(p.x, p.y, p.face, { text: label, bg: zoneColors[p.zone] }, zoneColors[p.zone]);
+      });
+    }
+
+    function drawStationBox(cx, cy, w, h, color, title, subtitle, textOffsetX = 0) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      roundRect(ctx, cx - w / 2, cy - h / 2, w, h, 14);
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      const maxTextW = w - 16;
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 12px "Noto Sans TC", sans-serif';
+      ctx.fillText(title, cx + textOffsetX, cy - 11, maxTextW);
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = '600 11px "Noto Sans TC", sans-serif';
+      ctx.fillText(subtitle, cx + textOffsetX, cy + 12, maxTextW);
+      ctx.restore();
+    }
+
+    function drawCharacter(x, y, emoji, tag, ringColor) {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.ellipse(x, y + 14, 15, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Ring
+      ctx.strokeStyle = ringColor || '#94a3b8';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 18, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Body circle
+      ctx.fillStyle = '#1e293b';
+      ctx.fill();
+
+      // Face Emoji
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(emoji, x, y + 8);
+
+      // Overhead Tag
+      if (tag && tag.text) {
+        ctx.font = '800 11px "Noto Sans TC", sans-serif';
+        const tw = ctx.measureText(tag.text).width + 14;
+        ctx.fillStyle = tag.bg || '#0284c7';
+        roundRect(ctx, x - tw / 2, y - 38, tw, 19, 6);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(tag.text, x, y - 24);
+      }
+    }
+
+    function drawPlayer() {
+      const p = state.player;
+      // Target marker if moving via click
+      if (p.targetX !== null && p.targetY !== null) {
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.targetX, p.targetY, 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Player Character (HKG Ground Staff Uniform)
+      drawCharacter(p.x, p.y, '🧑🏻‍✈️', { text: '地勤 YOU', bg: '#0284c7' }, '#38bdf8');
+
+      // Overhead Gate / Belt Bubble (from HKG App)
+      if (p.headBubble) {
+        const txt = p.headBubble.text;
+        ctx.font = '900 13px "Noto Sans TC", sans-serif';
+        const bw = ctx.measureText(txt).width + 18;
+        ctx.fillStyle = '#10b981';
+        roundRect(ctx, p.x - bw / 2, p.y - 64, bw, 23, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#022c22';
+        ctx.fillText(txt, p.x, p.y - 48);
+      }
+
+      // Flashing Red FINAL CALL Overhead Text (Stage 3 STD -20m)
+      if (p.finalCall) {
+        const flash = Math.floor(performance.now() / 260) % 2 === 0;
+        ctx.fillStyle = flash ? '#ef4444' : '#991b1b';
+        roundRect(ctx, p.x - 54, p.y - 66, 108, 24, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#fef08a';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 12px sans-serif';
+        ctx.fillText('🚨 FINAL CALL', p.x, p.y - 50);
+      }
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    let lastTime = performance.now();
+    function gameLoop(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    // --- UI Button Bindings ---
+    document.getElementById('btnOpenPil').onclick = openPilModal;
+    document.getElementById('btnClosePil').onclick = () => elPilModal.classList.add('hidden');
+    document.getElementById('btnOpenPhone').onclick = () => openPhone('HOME');
+    document.getElementById('btnClosePhone').onclick = closePhone;
+    document.getElementById('btnPhoneHome').onclick = () => switchPhoneApp('HOME');
+
+    elBtnDocCheckTrigger.onclick = () => {
+      SoundFX.shutter();
+      state.docViewTab = 'PASSPORT';
+      openPhone('DOC_CHECK');
+    };
+
+    elBtnStartStage2.onclick = startStage2;
+    elBtnStartStage3.onclick = startStage3;
+
+    elBtnOverlayAction.onclick = () => {
+      elOverlayModal.classList.add('hidden');
+      if (state.stage === 1 && elBtnOverlayAction.textContent.includes('第一關')) {
+        initNewShift();
+        SoundFX.chime();
+      } else if (state.stage === 2) {
+        startStage3();
+      } else if (state.stage === 3 && state.s3Phase === 'DONE') {
+        initNewShift();
+        SoundFX.chime();
+      }
+    };
+
+    // Start on Window Load
+    window.onload = function () {
+      initNewShift();
+      requestAnimationFrame(gameLoop);
+    };
+  </script>
+</body>
+</html>
